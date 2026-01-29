@@ -1,4 +1,6 @@
 Script started
 URI: mongodb+srv://sarthaksinha0212_db_user:5JyEhXlHzrurHdUA@cluster0.hnzlae0.mongodb.net/talentcio
 MongoDB Connected: ac-2sss4rb-shard-00-02.hnzlae0.mongodb.net
-User NOT found with email: admin@techcorp.com
+User found: admin@techcorp.com
+Password hash: $2b$10$zY8hOnPqemK2UQoK8HzDcOq77CDdP.vZEfb7tiQSBkAsWZbG1gHqe
+Password match result: true

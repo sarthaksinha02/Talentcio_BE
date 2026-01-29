@@ -81,7 +81,7 @@ const updateUserRole = async (req, res) => {
     const { roleId } = req.body;
     try {
         const user = await User.findById(req.params.id);
-        
+
         if (!user || user.company.toString() !== req.user.company.toString()) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -100,11 +100,11 @@ const updateUserRole = async (req, res) => {
 // @route   PUT /api/users/:id
 // @access  Private (Admin)
 const updateUser = async (req, res) => {
-    const { firstName, lastName, email, roleId, department, employeeCode, joiningDate, directReports } = req.body;
+    const { firstName, lastName, email, password, roleId, department, employeeCode, joiningDate, directReports } = req.body;
     console.log('Update User Body:', req.body); // DEBUG LOG
     try {
         const user = await User.findById(req.params.id);
-        
+
         if (!user || user.company.toString() !== req.user.company.toString()) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -112,15 +112,16 @@ const updateUser = async (req, res) => {
         user.firstName = firstName || user.firstName;
         user.lastName = lastName || user.lastName;
         user.email = email || user.email;
+        if (password) user.password = password;
         user.department = department || user.department;
         user.employeeCode = employeeCode || user.employeeCode;
         if (joiningDate) user.joiningDate = joiningDate;
-        
+
         if (roleId) {
-             const role = await Role.findById(roleId);
-             if (role && (role.company.toString() === req.user.company.toString() || role.isSystem)) {
-                 user.roles = [roleId];
-             }
+            const role = await Role.findById(roleId);
+            if (role && (role.company.toString() === req.user.company.toString() || role.isSystem)) {
+                user.roles = [roleId];
+            }
         }
 
         await user.save();
@@ -166,7 +167,7 @@ const getMyself = async (req, res) => {
             .select('-password')
             .populate('roles', 'name')
             .populate('reportingManager', 'firstName lastName email');
-            
+
         // Also fetch subordinates
         const subordinates = await User.find({ reportingManager: req.user._id })
             .select('firstName lastName email role department');
