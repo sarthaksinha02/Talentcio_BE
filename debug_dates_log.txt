@@ -1,0 +1,6 @@
+Test started
+MongoDB Connected: localhost
+Project created: 2025-01-01T00:00:00.000Z 2025-12-31T00:00:00.000Z
+Module created: 2025-01-01T00:00:00.000Z 2025-12-31T00:00:00.000Z
+Task created: 2025-01-01T00:00:00.000Z 2025-12-31T00:00:00.000Z
+Cleanup complete

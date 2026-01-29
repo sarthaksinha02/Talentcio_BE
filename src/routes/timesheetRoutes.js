@@ -1,0 +1,31 @@
+const express = require('express');
+const router = express.Router();
+const { protect } = require('../middlewares/authMiddleware');
+const { authorize } = require('../middlewares/authorize');
+const { 
+    getCurrentTimesheet, 
+    getUserTimesheet,
+    addEntry, 
+
+    submitTimesheet,
+    getProjects,
+    createProject,
+    getPendingTimesheets,
+
+    approveTimesheet,
+    updateEntry
+} = require('../controllers/timesheetController');
+
+router.use(protect); 
+
+router.get('/current', getCurrentTimesheet);
+router.get('/user/:userId', getUserTimesheet);
+router.post('/entry', addEntry);
+router.put('/entry/:entryId', updateEntry);
+router.post('/submit', submitTimesheet);
+router.get('/projects', getProjects);
+router.post('/projects', createProject); 
+router.get('/approvals', getPendingTimesheets);
+router.put('/:id/approve', approveTimesheet);
+
+module.exports = router;

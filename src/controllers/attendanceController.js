@@ -1,0 +1,423 @@
+const Attendance = require('../models/Attendance');
+const Timesheet = require('../models/Timesheet');
+const User = require('../models/User');
+const Project = require('../models/Project');
+const { startOfDay, endOfDay, format } = require('date-fns');
+
+// @desc    Update Attendance (Regularize)
+// @route   PUT /api/attendance/:id
+// @access  Private
+const updateAttendance = async (req, res) => {
+    const { clockIn, clockOut } = req.body;
+    try {
+        const attendance = await Attendance.findById(req.params.id);
+
+        if (!attendance) {
+            return res.status(404).json({ message: 'Attendance record not found' });
+        }
+
+        // Authorization: User can edit their own (if policy allows) or Admin/Manager
+        const isOwner = attendance.user.toString() === req.user._id.toString();
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+        
+        // Check for specific permission
+        const hasUpdatePermission = req.user.roles.some(r => r.permissions.some(p => p.key === 'attendance.update_self'));
+
+        if (isOwner && !isAdmin && !hasUpdatePermission) {
+             return res.status(403).json({ message: 'You do not have permission to edit your attendance.' });
+        }
+
+        if (!isOwner && !isAdmin) {
+             return res.status(403).json({ message: 'Not authorized to edit this attendance record.' });
+        }
+
+        // Check if Timesheet is locked
+
+        // Check if Timesheet is locked
+        const month = attendance.date.toISOString().slice(0, 7); // YYYY-MM
+        const timesheet = await Timesheet.findOne({ user: attendance.user, month });
+        
+        if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
+            return res.status(400).json({ message: 'Cannot edit attendance for a submitted or approved timesheet.' });
+        }
+
+        if (clockIn) {
+            attendance.clockIn = new Date(clockIn);
+            attendance.clockInIST = new Date(clockIn).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' });
+        }
+        
+        if (clockOut) {
+            attendance.clockOut = new Date(clockOut);
+            attendance.clockOutIST = new Date(clockOut).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' });
+        }
+
+        await attendance.save();
+        res.json(attendance);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Create Manual Attendance Entry
+// @route   POST /api/attendance
+// @access  Private
+const createAttendance = async (req, res) => {
+    const { date, clockIn, clockOut } = req.body;
+    try {
+        if (!date) {
+             return res.status(400).json({ message: 'Date is required' });
+        }
+
+        if (!clockIn || !clockOut) {
+             return res.status(400).json({ message: 'Both Check-In and Check-Out times are required for manual entry.' });
+        }
+
+        const attendanceDate = new Date(date);
+        
+        // Authorization
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+        const hasUpdatePermission = req.user.roles.some(r => r.permissions.some(p => p.key === 'attendance.update_self'));
+
+        if (!isAdmin && !hasUpdatePermission) {
+             return res.status(403).json({ message: 'You do not have permission to create attendance records.' });
+        }
+
+        // Check lock status via Timesheet
+        const month = attendanceDate.toISOString().slice(0, 7); // YYYY-MM
+        const timesheet = await Timesheet.findOne({ user: req.user._id, month });
+        
+        if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
+            return res.status(400).json({ message: 'Cannot add attendance to a submitted or approved timesheet.' });
+        }
+
+        // Check duplicate
+        const start = startOfDay(attendanceDate);
+        const end = endOfDay(attendanceDate);
+        
+        const existing = await Attendance.findOne({
+            user: req.user._id,
+            date: { $gte: start, $lte: end }
+        });
+
+        if (existing) {
+            return res.status(400).json({ message: 'Attendance record already exists for this date.' });
+        }
+
+        // Create
+        const newAttendance = new Attendance({
+            user: req.user._id,
+            company: req.user.company,
+            date: attendanceDate,
+            status: 'PRESENT',
+            clockIn: clockIn ? new Date(clockIn) : null,
+            clockOut: clockOut ? new Date(clockOut) : null,
+            clockInIST: clockIn ? new Date(clockIn).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' }) : null,
+            clockOutIST: clockOut ? new Date(clockOut).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' }) : null,
+            isManualEntry: true
+        });
+
+        await newAttendance.save();
+        res.status(201).json(newAttendance);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+
+// Helper to get time in IST
+const getISTTime = () => {
+    return new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+};
+
+// Helper to get Start of Day in IST (returned as a Date object)
+const getStartOfDayIST = () => {
+    const now = new Date();
+    // Create date string for IST
+    const istString = now.toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' });
+    return new Date(istString); // This gives 00:00:00 of that day in local server time, effectively normalizing the "day" bucket
+};
+
+// @desc    Get today's attendance status
+// @route   GET /api/attendance/today
+// @access  Private
+const getTodayStatus = async (req, res) => {
+    try {
+        const today = getStartOfDayIST();
+        
+        const attendance = await Attendance.findOne({
+            user: req.user._id,
+            date: {
+                $gte: today, 
+                $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+            }
+        });
+
+        res.json(attendance || { status: 'Not Clocked In' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Clock In
+// @route   POST /api/attendance/clock-in
+// @access  Private
+const clockIn = async (req, res) => {
+    try {
+        const today = getStartOfDayIST();
+        
+        // Check if already exists for today (IST)
+        let attendance = await Attendance.findOne({
+            user: req.user._id,
+            date: {
+                $gte: today,
+                $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+            }
+        });
+
+        if (attendance && attendance.clockIn) {
+            return res.status(400).json({ message: 'Already clocked in for today' });
+        }
+
+        if (!attendance) {
+            attendance = new Attendance({
+                user: req.user._id,
+                company: req.user.company,
+                date: today,
+                status: 'PRESENT'
+            });
+        }
+
+        attendance.clockIn = new Date();
+        attendance.clockInIST = getISTTime();
+        attendance.ipAddress = req.ip;
+        
+        await attendance.save();
+
+        res.json(attendance);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Clock Out
+// @route   POST /api/attendance/clock-out
+// @access  Private
+const clockOut = async (req, res) => {
+    try {
+        const today = getStartOfDayIST();
+        
+        let attendance = await Attendance.findOne({
+            user: req.user._id,
+            date: {
+                $gte: today,
+                $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+            }
+        });
+
+        if (!attendance || !attendance.clockIn) {
+            return res.status(400).json({ message: 'You have not clocked in yet' });
+        }
+
+        if (attendance.clockOut) {
+             return res.status(400).json({ message: 'Already clocked out for today' });
+        }
+
+        const now = new Date();
+        attendance.clockOut = now;
+        attendance.clockOutIST = getISTTime();
+        
+        await attendance.save();
+
+        // --- AUTO SYNC TO TIMESHEET ---
+        try {
+            // 1. Calculate Hours
+            const durationMs = now - new Date(attendance.clockIn);
+            const hours = parseFloat((durationMs / (1000 * 60 * 60)).toFixed(2)); // Round to 2 decimals
+
+            if (hours > 0) {
+                // 2. Find or Create "General Work" Project
+                let generalProject = await Project.findOne({ 
+                    company: req.user.company, 
+                    name: 'General Work' 
+                });
+
+                if (!generalProject) {
+                    generalProject = await Project.create({
+                        name: 'General Work',
+                        description: 'Default project for attendance logs',
+                        company: req.user.company,
+                        isActive: true
+                    });
+                }
+
+                // 3. Find/Create Timesheet
+                const month = format(now, 'yyyy-MM');
+                let timesheet = await Timesheet.findOne({
+                    user: req.user._id,
+                    month: month
+                });
+
+                if (!timesheet) {
+                    timesheet = new Timesheet({
+                        user: req.user._id,
+                        company: req.user.company,
+                        month: month,
+                        entries: []
+                    });
+                }
+                
+                // 4. Upsert Entry
+                // Check if entry for today & general project exists
+                const existingIndex = timesheet.entries.findIndex(
+                    e => e.date.toISOString().split('T')[0] === now.toISOString().split('T')[0] 
+                    && e.project.toString() === generalProject._id.toString()
+                );
+
+                if (existingIndex > -1) {
+                    timesheet.entries[existingIndex].hours = hours; // Update hours
+                } else {
+                    timesheet.entries.push({
+                        date: now,
+                        project: generalProject._id,
+                        hours: hours,
+                        description: 'Auto-logged from Attendance'
+                    });
+                }
+
+                await timesheet.save();
+                console.log(`Auto-logged ${hours} hours to timesheet for user ${req.user._id}`);
+            }
+        } catch (syncError) {
+            console.error('Timesheet Sync Error:', syncError);
+            // Don't fail the clock-out request, just log error
+        }
+        // ------------------------------
+
+        res.json(attendance);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Get Attendance History (My Attendance)
+// @route   GET /api/attendance/me
+// @access  Private
+const getMyAttendance = async (req, res) => {
+    try {
+        const attendance = await Attendance.find({ user: req.user._id })
+            .sort({ date: -1 })
+            .limit(30);
+        
+        res.json(attendance);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Get Attendance by Month
+// @route   GET /api/attendance/history
+// @access  Private
+const getAttendanceByMonth = async (req, res) => {
+    const { year, month } = req.query; // 1-indexed month (1 = Jan)
+    
+    if (!year || !month) {
+        return res.status(400).json({ message: 'Year and month are required' });
+    }
+
+    try {
+        const startDate = new Date(Date.UTC(year, month - 1, 1));
+        const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+
+        const attendance = await Attendance.find({
+            user: req.user._id,
+            date: {
+                $gte: startDate,
+                $lte: endDate
+            }
+        }).sort({ date: 1 });
+        
+        res.json(attendance);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+const approveAttendance = async (req, res) => {
+    const { status, reason } = req.body; // 'APPROVED' or 'REJECTED'
+    try {
+        const attendance = await Attendance.findById(req.params.id)
+            .populate('user', 'reportingManager firstName lastName');
+
+        if (!attendance) {
+            return res.status(404).json({ message: 'Attendance record not found' });
+        }
+
+        // Check Permissions: Admin OR Reporting Manager
+        const targetUser = attendance.user;
+        const isManager = targetUser.reportingManager?.toString() === req.user._id.toString();
+        
+        // Helper to check permissions
+        const hasPermission = (key) => req.user.roles.some(r => r.permissions.some(p => p.key === key));
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin') || hasPermission('attendance.approve');
+
+        if (!isManager && !isAdmin) {
+            return res.status(403).json({ message: 'Not authorized to approve this attendance' });
+        }
+
+        attendance.approvalStatus = status;
+        attendance.approvedBy = req.user._id;
+        if (reason) attendance.rejectionReason = reason;
+
+        await attendance.save();
+        res.json(attendance);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Get Pending Attendance Requests (For Manager)
+// @route   GET /api/attendance/approvals
+// @access  Private
+const getPendingRequests = async (req, res) => {
+    try {
+        // Find users who report to this user
+        const User = require('../models/User'); 
+        const subordinates = await User.find({ reportingManager: req.user._id }).select('_id');
+        const subordinateIds = subordinates.map(u => u._id);
+
+        const requests = await Attendance.find({
+            user: { $in: subordinateIds },
+            approvalStatus: 'PENDING'
+        })
+        .populate('user', 'firstName lastName email employeeCode')
+        .sort({ date: -1 });
+
+        res.json(requests);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+module.exports = {
+    getTodayStatus,
+    clockIn,
+    clockOut,
+    getMyAttendance,
+    getAttendanceByMonth,
+    approveAttendance,
+    getPendingRequests,
+    updateAttendance,
+    createAttendance
+};

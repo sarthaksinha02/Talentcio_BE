@@ -1,0 +1,188 @@
+const User = require('../models/User');
+const Role = require('../models/Role');
+
+// @desc    Get All Users
+// @route   GET /api/users
+// @access  Private (Admin)
+const getUsers = async (req, res) => {
+    try {
+        const users = await User.find({ company: req.user.company })
+            .select('-password')
+            .select('-password')
+            .populate('roles', 'name')
+            .populate('reportingManager', 'firstName lastName email');
+        res.json(users);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Create User (Admin)
+// @route   POST /api/users
+// @access  Private (Admin)
+const createUser = async (req, res) => {
+    const { firstName, lastName, email, password, roleId, department, employeeCode, joiningDate, directReports } = req.body;
+    console.log('Create User Body:', req.body); // DEBUG LOG
+
+    try {
+        // Check if user exists
+        const userExists = await User.findOne({ email });
+        if (userExists) {
+            return res.status(400).json({ message: 'User already exists' });
+        }
+
+        // Validate Role
+        const role = await Role.findById(roleId);
+        if (!role || role.company.toString() !== req.user.company.toString()) {
+            return res.status(400).json({ message: 'Invalid Role' });
+        }
+
+        const user = await User.create({
+            firstName,
+            lastName,
+            email,
+            password,
+            company: req.user.company,
+            roles: [roleId],
+            department,
+            employeeCode,
+            joiningDate
+        });
+
+        // Handle Direct Reports
+        if (directReports && Array.isArray(directReports) && directReports.length > 0) {
+            await User.updateMany(
+                { _id: { $in: directReports } },
+                { $set: { reportingManager: user._id } }
+            );
+        }
+
+        if (user) {
+            res.status(201).json({
+                _id: user._id,
+                firstName: user.firstName,
+                email: user.email,
+                role: role.name
+            });
+        } else {
+            res.status(400).json({ message: 'Invalid user data' });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Update User Role
+// @route   PUT /api/users/:id/role
+// @access  Private (Admin)
+const updateUserRole = async (req, res) => {
+    const { roleId } = req.body;
+    try {
+        const user = await User.findById(req.params.id);
+        
+        if (!user || user.company.toString() !== req.user.company.toString()) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        user.roles = [roleId];
+        await user.save();
+
+        res.json({ message: 'User role updated' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Update User Details
+// @route   PUT /api/users/:id
+// @access  Private (Admin)
+const updateUser = async (req, res) => {
+    const { firstName, lastName, email, roleId, department, employeeCode, joiningDate, directReports } = req.body;
+    console.log('Update User Body:', req.body); // DEBUG LOG
+    try {
+        const user = await User.findById(req.params.id);
+        
+        if (!user || user.company.toString() !== req.user.company.toString()) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        user.firstName = firstName || user.firstName;
+        user.lastName = lastName || user.lastName;
+        user.email = email || user.email;
+        user.department = department || user.department;
+        user.employeeCode = employeeCode || user.employeeCode;
+        if (joiningDate) user.joiningDate = joiningDate;
+        
+        if (roleId) {
+             const role = await Role.findById(roleId);
+             if (role && (role.company.toString() === req.user.company.toString() || role.isSystem)) {
+                 user.roles = [roleId];
+             }
+        }
+
+        await user.save();
+
+        // Handle Direct Reports (Assign subordinates)
+        if (directReports && Array.isArray(directReports)) {
+            // 1. Unset reportingManager for users who were previously reporting but are NOT in the new list
+            await User.updateMany(
+                { reportingManager: user._id, _id: { $nin: directReports } },
+                { $unset: { reportingManager: "" } }
+            );
+
+            // 2. Set reportingManager for users in the new list
+            await User.updateMany(
+                { _id: { $in: directReports } },
+                { $set: { reportingManager: user._id } }
+            );
+        }
+
+        res.json({ message: 'User updated successfully', user });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+const getMyTeam = async (req, res) => {
+    try {
+        const team = await User.find({ reportingManager: req.user._id })
+            .select('-password')
+            .populate('roles', 'name')
+            .populate('reportingManager', 'firstName lastName email');
+        res.json(team);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+const getMyself = async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id)
+            .select('-password')
+            .populate('roles', 'name')
+            .populate('reportingManager', 'firstName lastName email');
+            
+        // Also fetch subordinates
+        const subordinates = await User.find({ reportingManager: req.user._id })
+            .select('firstName lastName email role department');
+
+        res.json({ ...user.toObject(), directReports: subordinates });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+module.exports = {
+    getUsers,
+    createUser,
+    updateUserRole,
+    updateUser,
+    getMyTeam,
+    getMyself
+};

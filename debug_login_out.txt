@@ -1,0 +1,2 @@
+STATUS: 200
+RESPONSE: {"_id":"697450b77a4d9253c95fc974","firstName":"Admin","email":"admin@gmail.com","roles":["Admin"],"permissions":["user.create","user.read","user.update","user.delete","role.create","role.read","role.update","timesheet.submit","timesheet.approve","attendance.clock_in","attendance.approve"],"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5NzQ1MGI3N2E0ZDkyNTNjOTVmYzk3NCIsImlhdCI6MTc2OTQ5MTg0MCwiZXhwIjoxNzcyMDgzODQwfQ.Y1D5qK5VjDYtkw9ba3mTSOlRVn0XDBCSUw2kRwoFnyk"}

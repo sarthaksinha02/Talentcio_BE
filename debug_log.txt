@@ -1,0 +1,6 @@
+Script started
+URI: mongodb://localhost:27017/hrcode
+MongoDB Connected: localhost
+User found: admin@gmail.com
+Password hash: $2b$10$mivCYkT/jgKS68/xq67zp.b4Gfqzk.GBxLnijUO9T7S/NPfJqmARu
+Password match result: true
