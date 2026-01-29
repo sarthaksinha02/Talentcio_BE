@@ -6,7 +6,7 @@ dotenv.config();
 
 const migrate = async () => {
     try {
-        await mongoose.connect(process.env.MONGODB_URI);
+        await mongoose.connect(process.env.MONGO_URI);
         console.log('MongoDB Connected');
 
         // Find attendance with no approvalStatus
