@@ -4,11 +4,11 @@ const Timesheet = require('./src/models/Timesheet');
 
 async function run() {
     try {
-        await mongoose.connect(process.env.MONGODB_URI);
-        
+        await mongoose.connect(process.env.MONGO_URI);
+
         // Find the most recent timesheet
         const timesheet = await Timesheet.findOne().sort({ updatedAt: -1 });
-        
+
         if (!timesheet) {
             console.log("No timesheet found");
         } else {

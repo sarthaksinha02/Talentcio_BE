@@ -13,11 +13,11 @@ const log = (msg) => {
     fs.appendFileSync(logFile, msg + '\n');
 };
 
-log('URI: ' + process.env.MONGODB_URI);
+log('URI: ' + process.env.MONGO_URI);
 
 const connectDB = async () => {
     try {
-        const conn = await mongoose.connect(process.env.MONGODB_URI);
+        const conn = await mongoose.connect(process.env.MONGO_URI);
         log(`MongoDB Connected: ${conn.connection.host}`);
     } catch (error) {
         log(`Error: ${error.message}`);
@@ -37,7 +37,7 @@ const checkUser = async () => {
         } else {
             log(`User found: ${user.email}`);
             log(`Password hash: ${user.password}`);
-            
+
             const isMatch = await bcrypt.compare(password, user.password);
             log(`Password match result: ${isMatch}`);
         }

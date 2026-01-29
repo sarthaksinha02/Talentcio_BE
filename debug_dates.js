@@ -18,7 +18,7 @@ const log = (msg) => {
 
 const testDates = async () => {
     try {
-        const conn = await mongoose.connect(process.env.MONGODB_URI);
+        const conn = await mongoose.connect(process.env.MONGO_URI);
         log(`MongoDB Connected: ${conn.connection.host}`);
 
         // 1. Get a company and user for reference
@@ -30,7 +30,7 @@ const testDates = async () => {
         // 2. Create Project with dates
         const startDate = new Date('2025-01-01');
         const dueDate = new Date('2025-12-31');
-        
+
         const project = await Project.create({
             name: 'Test Date Project',
             company: company._id,
@@ -38,7 +38,7 @@ const testDates = async () => {
             startDate: startDate,
             dueDate: dueDate
         });
-        
+
         log(`Project created: ${project.startDate?.toISOString()} ${project.dueDate?.toISOString()}`);
 
         // 3. Create Module with dates
@@ -48,7 +48,7 @@ const testDates = async () => {
             startDate: startDate,
             dueDate: dueDate
         });
-        
+
         log(`Module created: ${module.startDate?.toISOString()} ${module.dueDate?.toISOString()}`);
 
         // 4. Create Task with dates
@@ -58,7 +58,7 @@ const testDates = async () => {
             startDate: startDate,
             dueDate: dueDate
         });
-        
+
         log(`Task created: ${task.startDate?.toISOString()} ${task.dueDate?.toISOString()}`);
 
         // cleanup

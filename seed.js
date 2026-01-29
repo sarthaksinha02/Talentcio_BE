@@ -7,7 +7,7 @@ const Permission = require('./src/models/Permission');
 
 const seedData = async () => {
     try {
-        await mongoose.connect(process.env.MONGODB_URI);
+        await mongoose.connect(process.env.MONGO_URI);
         console.log('MongoDB Connected');
 
         // 1. Create Company
@@ -51,7 +51,7 @@ const seedData = async () => {
         // 4. Create Admin User
         const email = 'admin@techcorp.com';
         const password = 'password123';
-        
+
         let adminUser = await User.findOne({ email });
         if (!adminUser) {
             adminUser = await User.create({

@@ -10,8 +10,8 @@ async function run() {
     try {
         // 0. Connect to DB to setup users
         console.log('Connecting to DB...');
-        connection = await mongoose.connect(process.env.MONGODB_URI);
-        
+        connection = await mongoose.connect(process.env.MONGO_URI);
+
         // 1. Get Company
         const company = await Company.findOne();
         if (!company) throw new Error('No company found');
@@ -40,16 +40,16 @@ async function run() {
         // 3. Login to get Tokens
         console.log('Logging in Manager...');
         const mgrLogin = await fetch(`${API_URL}/auth/login`, {
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'},
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: mgrEmail, password })
         });
         const mgrToken = (await mgrLogin.json()).token;
 
         console.log('Logging in Employee...');
         const empLogin = await fetch(`${API_URL}/auth/login`, {
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'},
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: empEmail, password })
         });
         const empToken = (await empLogin.json()).token;
@@ -57,18 +57,18 @@ async function run() {
         // 4. Employee Submits Timesheet
         console.log('Employee Submitting Timesheet...');
         const empHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${empToken}` };
-        
+
         // Get Projects
         const pRes = await fetch(`${API_URL}/timesheet/projects`, { headers: empHeaders });
         const projects = await pRes.json();
         let projectId = projects[0]?._id;
-        
+
         if (!projectId) {
-             // Create if none (needs admin, or just use fake ID? No, needs valid ID)
-             // Let's assume projects exist from seed. Or fail.
-             console.log('No projects found, trying to proceed... (Might fail constraint)');
-             // Attempt to create one via Admin if needed, or assume seed.js ran.
-             // Assume seed ran.
+            // Create if none (needs admin, or just use fake ID? No, needs valid ID)
+            // Let's assume projects exist from seed. Or fail.
+            console.log('No projects found, trying to proceed... (Might fail constraint)');
+            // Attempt to create one via Admin if needed, or assume seed.js ran.
+            // Assume seed ran.
         }
 
         const date = new Date().toISOString();
@@ -79,7 +79,7 @@ async function run() {
 
         const month = date.slice(0, 7);
         const submitRes = await fetch(`${API_URL}/timesheet/submit`, {
-             method: 'POST', headers: empHeaders, body: JSON.stringify({ month })
+            method: 'POST', headers: empHeaders, body: JSON.stringify({ month })
         });
         const timesheet = await submitRes.json();
         const tsId = timesheet._id;
@@ -88,7 +88,7 @@ async function run() {
         // 5. Manager Rejects
         console.log('Manager Rejecting...');
         const mgrHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${mgrToken}` };
-        
+
         const rejectRes = await fetch(`${API_URL}/timesheet/${tsId}/approve`, {
             method: 'PUT',
             headers: mgrHeaders,

@@ -14,24 +14,24 @@ const log = (msg) => {
 
 const resetPassword = async () => {
     try {
-        const conn = await mongoose.connect(process.env.MONGODB_URI);
+        const conn = await mongoose.connect(process.env.MONGO_URI);
         log(`MongoDB Connected: ${conn.connection.host}`);
-        
+
         const email = 'admin@gmail.com';
         const newPassword = 'Admin@123';
-        
+
         const user = await User.findOne({ email });
         if (!user) {
             log('User not found');
             process.exit(1);
         }
-        
+
         // This will trigger the pre check which hashes the password
         user.password = newPassword;
         await user.save();
-        
+
         log(`Password for ${email} has been reset to ${newPassword}`);
-        
+
     } catch (error) {
         log(error.message);
         process.exit(1);
