@@ -1,8 +1,8 @@
 const http = require('http');
 
 const loginData = JSON.stringify({
-  email: 'admin@techcorp.com',
-  password: 'password123'
+    email: 'admin@techcorp.com',
+    password: 'password123'
 });
 
 const runDebug = () => {
@@ -19,14 +19,14 @@ const runDebug = () => {
         res.on('end', () => {
             const token = JSON.parse(body).token;
             console.log('Got Token');
-            
+
             // 2. Get Current Timesheet
             const req2 = http.request({
                 hostname: 'localhost',
                 port: 5000,
                 path: '/api/timesheet/current',
                 method: 'GET',
-                headers: { 
+                headers: {
                     'Authorization': `Bearer ${token}`
                 }
             }, (res2) => {

@@ -27,8 +27,8 @@ const connectDB = async () => {
 
 const checkUser = async () => {
     await connectDB();
-    const email = 'admin@gmail.com';
-    const password = 'Admin@123';
+    const email = 'admin@techcorp.com';
+    const password = 'password123';
 
     try {
         const user = await User.findOne({ email });
