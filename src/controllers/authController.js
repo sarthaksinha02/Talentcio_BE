@@ -31,7 +31,7 @@ const registerCompany = async (req, res) => {
         // For now, we will create the user and let the seed/bootstrap handle role assignment
         // or hardcode 'isSystem' check if we added that to User (we added it to Role).
         // Let's assume we simply create the user for now.
-        
+
         const user = await User.create({
             firstName,
             lastName,
@@ -41,7 +41,7 @@ const registerCompany = async (req, res) => {
         });
 
         if (user) {
-             res.status(201).json({
+            res.status(201).json({
                 _id: user._id,
                 firstName: user.firstName,
                 email: user.email,
@@ -69,7 +69,7 @@ const loginUser = async (req, res) => {
             populate: {
                 path: 'permissions'
             }
-        }).populate('reportingManager', 'firstName lastName');
+        }).populate('reportingManagers', 'firstName lastName');
 
         if (user && (await user.matchPassword(password))) {
             // Flatten unique permissions
@@ -84,17 +84,17 @@ const loginUser = async (req, res) => {
                 email: user.email,
                 joiningDate: user.joiningDate,
                 company: user.company,
-                reportingManager: user.reportingManager,
+                reportingManagers: user.reportingManagers,
                 roles: user.roles.map(r => r.name),
-                permissions: permissions, 
+                permissions: permissions,
                 token: generateToken(user._id)
             });
         } else {
-             res.status(401).json({ message: 'Invalid email or password' });
+            res.status(401).json({ message: 'Invalid email or password' });
         }
     } catch (error) {
-         console.error('LOGIN ERROR:', error);
-         res.status(500).json({ message: 'Server Error', error: error.message });
+        console.error('LOGIN ERROR:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
 

@@ -11,7 +11,7 @@ const WorkLog = require('../models/WorkLog');
 const getCurrentTimesheet = async (req, res) => {
     try {
         const currentMonth = format(new Date(), 'yyyy-MM');
-        
+
         if (!req.user) {
             return res.status(401).json({ message: 'User not authenticated (req.user missing)' });
         }
@@ -37,15 +37,15 @@ const getCurrentTimesheet = async (req, res) => {
         try {
             fullUser = await User.findById(req.user._id)
                 .select('firstName lastName email employeeCode')
-                .populate('reportingManager', 'firstName lastName email');
+                .populate('reportingManagers', 'firstName lastName email');
         } catch (err) {
             console.error('Error populating user details:', err);
             // Fallback to basic req.user info if fetch fails
-            fullUser = { 
-                firstName: req.user.firstName, 
-                lastName: req.user.lastName, 
+            fullUser = {
+                firstName: req.user.firstName,
+                lastName: req.user.lastName,
                 email: req.user.email,
-                employeeCode: req.user.employeeCode 
+                employeeCode: req.user.employeeCode
             };
         }
 
@@ -68,7 +68,7 @@ const getCurrentTimesheet = async (req, res) => {
         const entries = workLogs.map(log => ({
             _id: log._id,
             date: log.date,
-            project: log.task?.module?.project || { name: 'Unknown Project' }, 
+            project: log.task?.module?.project || { name: 'Unknown Project' },
             module: log.task?.module,
             task: log.task,
             taskName: log.task?.name,
@@ -84,12 +84,12 @@ const getCurrentTimesheet = async (req, res) => {
             date: { $gte: start, $lte: end }
         }).select('date clockInIST clockOutIST duration clockIn clockOut');
 
-        res.json({ 
-            ...timesheet.toObject(), 
+        res.json({
+            ...timesheet.toObject(),
             userDetails: fullUser, // Distinct key to avoid collision
             user: fullUser,        // Backup
-            entries, 
-            attendanceLog: attendance 
+            entries,
+            attendanceLog: attendance
         });
     } catch (error) {
         console.error('getCurrentTimesheet Error:', error);
@@ -114,7 +114,7 @@ const addEntry = async (req, res) => {
 // @route   POST /api/timesheet/submit
 // @access  Private
 const submitTimesheet = async (req, res) => {
-    const { month } = req.body; 
+    const { month } = req.body;
     try {
         const timesheet = await Timesheet.findOne({
             user: req.user._id,
@@ -127,7 +127,7 @@ const submitTimesheet = async (req, res) => {
 
         timesheet.status = 'SUBMITTED';
         await timesheet.save();
-        
+
         res.json(timesheet);
     } catch (error) {
         console.error(error);
@@ -159,8 +159,8 @@ const createProject = async (req, res) => {
         });
         res.json(project);
     } catch (error) {
-         console.error(error);
-         res.status(500).json({ message: 'Server Error' });
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
     }
 };
 
@@ -172,24 +172,24 @@ const getUserTimesheet = async (req, res) => {
     try {
         const targetUserId = req.params.userId;
         const currentMonth = req.query.month || format(new Date(), 'yyyy-MM');
-        
+
         if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
 
         // 1. Check Permissions
         const targetUser = await User.findById(targetUserId);
-        
+
         if (!targetUser) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        const isManager = targetUser.reportingManager?.toString() === req.user._id.toString();
+        const isManager = targetUser.reportingManagers?.some(m => m.toString() === req.user._id.toString());
         const hasRole = (name) => req.user.roles && req.user.roles.some(r => r.name === name);
         const hasPermission = (key) => req.user.roles && req.user.roles.some(r => r.permissions && r.permissions.some(p => p.key === key));
 
         const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve');
 
         if (!isManager && !isAdmin) {
-             return res.status(403).json({ message: 'Not authorized to view this timesheet' });
+            return res.status(403).json({ message: 'Not authorized to view this timesheet' });
         }
 
         let timesheet = await Timesheet.findOne({
@@ -200,14 +200,14 @@ const getUserTimesheet = async (req, res) => {
         // Fetch WorkLogs
         const [year, month] = currentMonth.split('-');
         const currentMonthIdx = parseInt(month) - 1;
-        
+
         let start, end;
         if (!isNaN(currentMonthIdx)) {
             start = startOfMonth(new Date(parseInt(year), currentMonthIdx));
             end = endOfMonth(new Date(parseInt(year), currentMonthIdx));
         } else {
-             start = startOfMonth(new Date());
-             end = endOfMonth(new Date());
+            start = startOfMonth(new Date());
+            end = endOfMonth(new Date());
         }
 
         const workLogs = await WorkLog.find({
@@ -224,7 +224,7 @@ const getUserTimesheet = async (req, res) => {
         const entries = workLogs.map(log => ({
             _id: log._id,
             date: log.date,
-            project: log.task?.module?.project || { name: 'Unknown Project' }, 
+            project: log.task?.module?.project || { name: 'Unknown Project' },
             module: log.task?.module,
             task: log.task,
             taskName: log.task?.name,
@@ -234,23 +234,23 @@ const getUserTimesheet = async (req, res) => {
             rejectionReason: log.rejectionReason
         }));
 
-        let responseData = timesheet ? timesheet.toObject() : { 
-            month: currentMonth, 
-            status: 'NOT_STARTED' 
+        let responseData = timesheet ? timesheet.toObject() : {
+            month: currentMonth,
+            status: 'NOT_STARTED'
         };
-        
+
         // Ensure user is attached
         let fullTargetUser = null;
         try {
             fullTargetUser = await User.findById(targetUserId)
                 .select('firstName lastName email employeeCode')
-                .populate('reportingManager', 'firstName lastName email');
+                .populate('reportingManagers', 'firstName lastName email');
         } catch (err) {
             console.error('Error fetching target user details:', err);
-             // Fallback to what we already fetched
-             fullTargetUser = targetUser;
+            // Fallback to what we already fetched
+            fullTargetUser = targetUser;
         }
-            
+
         responseData.userDetails = fullTargetUser;
         responseData.user = fullTargetUser;
         responseData.entries = entries;
@@ -277,15 +277,15 @@ const getPendingTimesheets = async (req, res) => {
     try {
         if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
 
-        // Find subordinates
-        const subordinates = await User.find({ reportingManager: req.user._id }).select('_id');
+        // Find subordinates (where I am one of the reporting managers)
+        const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
         const subordinateIds = subordinates.map(u => u._id);
 
         const timesheets = await Timesheet.find({
             user: { $in: subordinateIds },
             status: 'SUBMITTED'
         }).populate('user', 'firstName lastName email employeeCode')
-          .sort({ month: -1 });
+            .sort({ month: -1 });
 
         res.json(timesheets);
     } catch (error) {
@@ -298,18 +298,18 @@ const getPendingTimesheets = async (req, res) => {
 // @route   PUT /api/timesheet/:id/approve
 // @access  Private
 const approveTimesheet = async (req, res) => {
-    const { status, reason, type = 'FULL', rejectedEntryIds = [] } = req.body; 
+    const { status, reason, type = 'FULL', rejectedEntryIds = [] } = req.body;
     try {
         const timesheet = await Timesheet.findById(req.params.id)
-            .populate('user', 'reportingManager');
+            .populate('user', 'reportingManagers');
 
         if (!timesheet) {
             return res.status(404).json({ message: 'Timesheet not found' });
         }
 
         const targetUser = timesheet.user;
-        const isManager = targetUser.reportingManager?.toString() === req.user._id.toString();
-        
+        const isManager = targetUser.reportingManagers?.some(m => m.toString() === req.user._id.toString());
+
         const hasRole = (name) => req.user.roles && req.user.roles.some(r => r.name === name);
         const hasPermission = (key) => req.user.roles && req.user.roles.some(r => r.permissions && r.permissions.some(p => p.key === key));
         const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve');
@@ -323,10 +323,10 @@ const approveTimesheet = async (req, res) => {
         const end = endOfMonth(new Date(parseInt(year), parseInt(month) - 1));
 
         if (status === 'REJECTED' && type === 'PARTIAL') {
-            timesheet.status = 'REJECTED'; 
+            timesheet.status = 'REJECTED';
             timesheet.approver = req.user._id;
             timesheet.rejectionReason = "Partial Rejection: " + reason;
-            
+
             if (rejectedEntryIds.length > 0) {
                 await WorkLog.updateMany(
                     { _id: { $in: rejectedEntryIds } },
@@ -338,18 +338,18 @@ const approveTimesheet = async (req, res) => {
             timesheet.status = status;
             timesheet.approver = req.user._id;
             if (reason) timesheet.rejectionReason = reason;
-            
-             const entryStatus = status === 'APPROVED' ? 'APPROVED' : 'REJECTED';
-             const updateDoc = { status: entryStatus };
-             if (status === 'REJECTED') updateDoc.rejectionReason = reason;
 
-             await WorkLog.updateMany(
-                { 
+            const entryStatus = status === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+            const updateDoc = { status: entryStatus };
+            if (status === 'REJECTED') updateDoc.rejectionReason = reason;
+
+            await WorkLog.updateMany(
+                {
                     user: targetUser._id,
                     date: { $gte: start, $lte: end }
                 },
                 { $set: updateDoc }
-             );
+            );
         }
 
         await timesheet.save();
@@ -372,25 +372,25 @@ const updateEntry = async (req, res) => {
         if (!workLog) {
             return res.status(404).json({ message: 'Entry (WorkLog) not found' });
         }
-        
+
         const owner = workLog.user;
         const requestor = req.user;
 
         const isOwner = owner._id.toString() === requestor._id.toString();
-        const isManager = owner.reportingManager?.toString() === requestor._id.toString();
+        const isManager = owner.reportingManagers?.some(m => m.toString() === requestor._id.toString());
         const isAdmin = requestor.roles && requestor.roles.some(r => r.name === 'Admin');
 
         if (!isOwner && !isManager && !isAdmin) {
-             return res.status(403).json({ message: 'Not authorized' });
+            return res.status(403).json({ message: 'Not authorized' });
         }
 
         const month = format(workLog.date, 'yyyy-MM');
         const timesheet = await Timesheet.findOne({ user: owner._id, month });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-             if (!isManager && !isAdmin) {
+            if (!isManager && !isAdmin) {
                 return res.status(400).json({ message: 'Cannot edit submitted/approved timesheets' });
-             }
+            }
         }
 
         if (hours !== undefined) workLog.hours = hours;
@@ -398,7 +398,7 @@ const updateEntry = async (req, res) => {
 
         if (workLog.status === 'REJECTED') {
             workLog.status = 'PENDING';
-            workLog.rejectionReason = undefined; 
+            workLog.rejectionReason = undefined;
         }
 
         await workLog.save();

@@ -30,18 +30,18 @@ const userSchema = new mongoose.Schema({
     },
     department: String,
     employeeCode: String,
-    reportingManager: {
+    reportingManagers: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
-    },
+    }],
     joiningDate: Date
 }, { timestamps: true });
 
 // Encrypt password before save
 // Encrypt password before save
-userSchema.pre('save', async function() {
+userSchema.pre('save', async function () {
     if (!this.isModified('password')) return;
-    
+
     try {
         const salt = await bcrypt.genSalt(10);
         this.password = await bcrypt.hash(this.password, salt);
@@ -50,7 +50,7 @@ userSchema.pre('save', async function() {
     }
 });
 
-userSchema.methods.matchPassword = async function(enteredPassword) {
+userSchema.methods.matchPassword = async function (enteredPassword) {
     return await bcrypt.compare(enteredPassword, this.password);
 };
 

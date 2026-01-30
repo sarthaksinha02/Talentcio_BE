@@ -19,16 +19,16 @@ const updateAttendance = async (req, res) => {
         // Authorization: User can edit their own (if policy allows) or Admin/Manager
         const isOwner = attendance.user.toString() === req.user._id.toString();
         const isAdmin = req.user.roles.some(r => r.name === 'Admin');
-        
+
         // Check for specific permission
         const hasUpdatePermission = req.user.roles.some(r => r.permissions.some(p => p.key === 'attendance.update_self'));
 
         if (isOwner && !isAdmin && !hasUpdatePermission) {
-             return res.status(403).json({ message: 'You do not have permission to edit your attendance.' });
+            return res.status(403).json({ message: 'You do not have permission to edit your attendance.' });
         }
 
         if (!isOwner && !isAdmin) {
-             return res.status(403).json({ message: 'Not authorized to edit this attendance record.' });
+            return res.status(403).json({ message: 'Not authorized to edit this attendance record.' });
         }
 
         // Check if Timesheet is locked
@@ -36,7 +36,7 @@ const updateAttendance = async (req, res) => {
         // Check if Timesheet is locked
         const month = attendance.date.toISOString().slice(0, 7); // YYYY-MM
         const timesheet = await Timesheet.findOne({ user: attendance.user, month });
-        
+
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
             return res.status(400).json({ message: 'Cannot edit attendance for a submitted or approved timesheet.' });
         }
@@ -45,7 +45,7 @@ const updateAttendance = async (req, res) => {
             attendance.clockIn = new Date(clockIn);
             attendance.clockInIST = new Date(clockIn).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' });
         }
-        
+
         if (clockOut) {
             attendance.clockOut = new Date(clockOut);
             attendance.clockOutIST = new Date(clockOut).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' });
@@ -67,27 +67,27 @@ const createAttendance = async (req, res) => {
     const { date, clockIn, clockOut } = req.body;
     try {
         if (!date) {
-             return res.status(400).json({ message: 'Date is required' });
+            return res.status(400).json({ message: 'Date is required' });
         }
 
         if (!clockIn || !clockOut) {
-             return res.status(400).json({ message: 'Both Check-In and Check-Out times are required for manual entry.' });
+            return res.status(400).json({ message: 'Both Check-In and Check-Out times are required for manual entry.' });
         }
 
         const attendanceDate = new Date(date);
-        
+
         // Authorization
         const isAdmin = req.user.roles.some(r => r.name === 'Admin');
         const hasUpdatePermission = req.user.roles.some(r => r.permissions.some(p => p.key === 'attendance.update_self'));
 
         if (!isAdmin && !hasUpdatePermission) {
-             return res.status(403).json({ message: 'You do not have permission to create attendance records.' });
+            return res.status(403).json({ message: 'You do not have permission to create attendance records.' });
         }
 
         // Check lock status via Timesheet
         const month = attendanceDate.toISOString().slice(0, 7); // YYYY-MM
         const timesheet = await Timesheet.findOne({ user: req.user._id, month });
-        
+
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
             return res.status(400).json({ message: 'Cannot add attendance to a submitted or approved timesheet.' });
         }
@@ -95,7 +95,7 @@ const createAttendance = async (req, res) => {
         // Check duplicate
         const start = startOfDay(attendanceDate);
         const end = endOfDay(attendanceDate);
-        
+
         const existing = await Attendance.findOne({
             user: req.user._id,
             date: { $gte: start, $lte: end }
@@ -147,11 +147,11 @@ const getStartOfDayIST = () => {
 const getTodayStatus = async (req, res) => {
     try {
         const today = getStartOfDayIST();
-        
+
         const attendance = await Attendance.findOne({
             user: req.user._id,
             date: {
-                $gte: today, 
+                $gte: today,
                 $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
             }
         });
@@ -169,7 +169,7 @@ const getTodayStatus = async (req, res) => {
 const clockIn = async (req, res) => {
     try {
         const today = getStartOfDayIST();
-        
+
         // Check if already exists for today (IST)
         let attendance = await Attendance.findOne({
             user: req.user._id,
@@ -195,7 +195,7 @@ const clockIn = async (req, res) => {
         attendance.clockIn = new Date();
         attendance.clockInIST = getISTTime();
         attendance.ipAddress = req.ip;
-        
+
         await attendance.save();
 
         res.json(attendance);
@@ -211,7 +211,7 @@ const clockIn = async (req, res) => {
 const clockOut = async (req, res) => {
     try {
         const today = getStartOfDayIST();
-        
+
         let attendance = await Attendance.findOne({
             user: req.user._id,
             date: {
@@ -225,13 +225,13 @@ const clockOut = async (req, res) => {
         }
 
         if (attendance.clockOut) {
-             return res.status(400).json({ message: 'Already clocked out for today' });
+            return res.status(400).json({ message: 'Already clocked out for today' });
         }
 
         const now = new Date();
         attendance.clockOut = now;
         attendance.clockOutIST = getISTTime();
-        
+
         await attendance.save();
 
         // --- AUTO SYNC TO TIMESHEET ---
@@ -242,9 +242,9 @@ const clockOut = async (req, res) => {
 
             if (hours > 0) {
                 // 2. Find or Create "General Work" Project
-                let generalProject = await Project.findOne({ 
-                    company: req.user.company, 
-                    name: 'General Work' 
+                let generalProject = await Project.findOne({
+                    company: req.user.company,
+                    name: 'General Work'
                 });
 
                 if (!generalProject) {
@@ -271,12 +271,12 @@ const clockOut = async (req, res) => {
                         entries: []
                     });
                 }
-                
+
                 // 4. Upsert Entry
                 // Check if entry for today & general project exists
                 const existingIndex = timesheet.entries.findIndex(
-                    e => e.date.toISOString().split('T')[0] === now.toISOString().split('T')[0] 
-                    && e.project.toString() === generalProject._id.toString()
+                    e => e.date.toISOString().split('T')[0] === now.toISOString().split('T')[0]
+                        && e.project.toString() === generalProject._id.toString()
                 );
 
                 if (existingIndex > -1) {
@@ -314,7 +314,7 @@ const getMyAttendance = async (req, res) => {
         const attendance = await Attendance.find({ user: req.user._id })
             .sort({ date: -1 })
             .limit(30);
-        
+
         res.json(attendance);
     } catch (error) {
         console.error(error);
@@ -327,7 +327,7 @@ const getMyAttendance = async (req, res) => {
 // @access  Private
 const getAttendanceByMonth = async (req, res) => {
     const { year, month } = req.query; // 1-indexed month (1 = Jan)
-    
+
     if (!year || !month) {
         return res.status(400).json({ message: 'Year and month are required' });
     }
@@ -343,7 +343,7 @@ const getAttendanceByMonth = async (req, res) => {
                 $lte: endDate
             }
         }).sort({ date: 1 });
-        
+
         res.json(attendance);
     } catch (error) {
         console.error(error);
@@ -355,16 +355,18 @@ const approveAttendance = async (req, res) => {
     const { status, reason } = req.body; // 'APPROVED' or 'REJECTED'
     try {
         const attendance = await Attendance.findById(req.params.id)
-            .populate('user', 'reportingManager firstName lastName');
+            .populate('user', 'reportingManagers firstName lastName');
 
         if (!attendance) {
             return res.status(404).json({ message: 'Attendance record not found' });
         }
 
-        // Check Permissions: Admin OR Reporting Manager
+        // Check Permissions: Admin OR One of Reporting Managers
         const targetUser = attendance.user;
-        const isManager = targetUser.reportingManager?.toString() === req.user._id.toString();
-        
+        const isManager = targetUser.reportingManagers?.some(
+            managerId => managerId.toString() === req.user._id.toString()
+        );
+
         // Helper to check permissions
         const hasPermission = (key) => req.user.roles.some(r => r.permissions.some(p => p.key === key));
         const isAdmin = req.user.roles.some(r => r.name === 'Admin') || hasPermission('attendance.approve');
@@ -391,17 +393,17 @@ const approveAttendance = async (req, res) => {
 // @access  Private
 const getPendingRequests = async (req, res) => {
     try {
-        // Find users who report to this user
-        const User = require('../models/User'); 
-        const subordinates = await User.find({ reportingManager: req.user._id }).select('_id');
+        // Find users who have this user as ONE OF their reporting managers
+        const User = require('../models/User');
+        const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
         const subordinateIds = subordinates.map(u => u._id);
 
         const requests = await Attendance.find({
             user: { $in: subordinateIds },
             approvalStatus: 'PENDING'
         })
-        .populate('user', 'firstName lastName email employeeCode')
-        .sort({ date: -1 });
+            .populate('user', 'firstName lastName email employeeCode')
+            .sort({ date: -1 });
 
         res.json(requests);
     } catch (error) {

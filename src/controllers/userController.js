@@ -10,7 +10,7 @@ const getUsers = async (req, res) => {
             .select('-password')
             .select('-password')
             .populate('roles', 'name')
-            .populate('reportingManager', 'firstName lastName email');
+            .populate('reportingManagers', 'firstName lastName email');
         res.json(users);
     } catch (error) {
         console.error(error);
@@ -22,7 +22,7 @@ const getUsers = async (req, res) => {
 // @route   POST /api/users
 // @access  Private (Admin)
 const createUser = async (req, res) => {
-    const { firstName, lastName, email, password, roleId, department, employeeCode, joiningDate, directReports } = req.body;
+    const { firstName, lastName, email, password, roleId, department, employeeCode, joiningDate, directReports, reportingManagers } = req.body;
     console.log('Create User Body:', req.body); // DEBUG LOG
 
     try {
@@ -47,14 +47,15 @@ const createUser = async (req, res) => {
             roles: [roleId],
             department,
             employeeCode,
-            joiningDate
+            joiningDate,
+            reportingManagers: reportingManagers || []
         });
 
         // Handle Direct Reports
         if (directReports && Array.isArray(directReports) && directReports.length > 0) {
             await User.updateMany(
                 { _id: { $in: directReports } },
-                { $set: { reportingManager: user._id } }
+                { $addToSet: { reportingManagers: user._id } }
             );
         }
 
@@ -127,17 +128,18 @@ const updateUser = async (req, res) => {
         await user.save();
 
         // Handle Direct Reports (Assign subordinates)
+        // Handle Direct Reports (Assign subordinates)
         if (directReports && Array.isArray(directReports)) {
-            // 1. Unset reportingManager for users who were previously reporting but are NOT in the new list
+            // 1. Remove this user from reportingManagers of users who are NO LONGER direct reports
             await User.updateMany(
-                { reportingManager: user._id, _id: { $nin: directReports } },
-                { $unset: { reportingManager: "" } }
+                { reportingManagers: user._id, _id: { $nin: directReports } },
+                { $pull: { reportingManagers: user._id } }
             );
 
-            // 2. Set reportingManager for users in the new list
+            // 2. Add this user to reportingManagers of users who ARE direct reports
             await User.updateMany(
                 { _id: { $in: directReports } },
-                { $set: { reportingManager: user._id } }
+                { $addToSet: { reportingManagers: user._id } }
             );
         }
 
@@ -150,10 +152,10 @@ const updateUser = async (req, res) => {
 
 const getMyTeam = async (req, res) => {
     try {
-        const team = await User.find({ reportingManager: req.user._id })
+        const team = await User.find({ reportingManagers: req.user._id })
             .select('-password')
             .populate('roles', 'name')
-            .populate('reportingManager', 'firstName lastName email');
+            .populate('reportingManagers', 'firstName lastName email');
         res.json(team);
     } catch (error) {
         console.error(error);
@@ -166,10 +168,10 @@ const getMyself = async (req, res) => {
         const user = await User.findById(req.user._id)
             .select('-password')
             .populate('roles', 'name')
-            .populate('reportingManager', 'firstName lastName email');
+            .populate('reportingManagers', 'firstName lastName email');
 
         // Also fetch subordinates
-        const subordinates = await User.find({ reportingManager: req.user._id })
+        const subordinates = await User.find({ reportingManagers: req.user._id })
             .select('firstName lastName email role department');
 
         res.json({ ...user.toObject(), directReports: subordinates });
