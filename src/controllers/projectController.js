@@ -90,9 +90,31 @@ const getProjects = async (req, res) => {
     try {
         // If user is basic employee, maybe we want to filter? 
         // For now, adhering to 'project.read' permission check in route.
-        const projects = await Project.find({ company: req.user.company })
+        // If Admin, fetch all. If not, fetch only assigned projects (manager, member, or has assigned task)
+        let query = { company: req.user.company };
+
+        // Check if user is Admin
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+
+        if (!isAdmin) {
+            // 1. Find Tasks assigned to user to get relevant Module IDs
+            // We need to find purely unique modules first to save lookup time
+            const assignedModuleIds = await Task.distinct('module', { assignees: req.user._id });
+
+            // 2. Find Projects associated with those modules
+            const taskProjectIds = await Module.distinct('project', { _id: { $in: assignedModuleIds } });
+
+            query.$or = [
+                { manager: req.user._id },
+                { members: req.user._id },
+                { _id: { $in: taskProjectIds } }
+            ];
+        }
+
+        const projects = await Project.find(query)
             .populate('client', 'name')
-            .populate('manager', 'firstName lastName');
+            .populate('manager', 'firstName lastName')
+            .populate('members', 'firstName lastName'); // Populate members to show them if needed
         res.json(projects);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -109,7 +131,7 @@ const getProjectHierarchy = async (req, res) => {
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
         const modules = await Module.find({ project: id }).sort({ startDate: 1 });
-        
+
         // Fetch all tasks for these modules
         const moduleIds = modules.map(m => m._id);
         const tasks = await Task.find({ module: { $in: moduleIds } })
@@ -211,7 +233,7 @@ const getTasks = async (req, res) => {
         const query = {};
         if (req.query.moduleId) query.module = req.query.moduleId;
         if (req.query.assignees) query.assignees = req.query.assignees; // Check assignees array
-        
+
         const tasks = await Task.find(query)
             .populate('assignees', 'firstName lastName')
             .populate({

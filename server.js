@@ -30,6 +30,7 @@ const timesheetRoutes = require('./src/routes/timesheetRoutes');
 const adminRoutes = require('./src/routes/adminRoutes');
 const projectRoutes = require('./src/routes/projectRoutes');
 const dashboardRoutes = require('./src/routes/dashboardRoutes');
+const holidayRoutes = require('./src/routes/holidayRoutes');
 
 // Database Connection & Init
 const initServer = async () => {
@@ -45,6 +46,7 @@ app.use('/api/timesheet', timesheetRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/holidays', holidayRoutes);
 
 app.get('/', (req, res) => {
     res.json({ message: 'HRCODE API is running' });

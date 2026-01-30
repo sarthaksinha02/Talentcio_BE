@@ -7,7 +7,7 @@ const Permission = require('../models/Permission');
 const getRoles = async (req, res) => {
     try {
         // Fetch roles belonging to company OR system roles
-        const roles = await Role.find({ 
+        const roles = await Role.find({
             $or: [
                 { company: req.user.company },
                 { isSystem: true }
@@ -46,18 +46,18 @@ const createRole = async (req, res) => {
 const updateRole = async (req, res) => {
     try {
         const role = await Role.findOne({ _id: req.params.id, company: req.user.company });
-        
+
         if (!role) {
             return res.status(404).json({ message: 'Role not found' });
         }
-        
+
         if (role.isSystem) {
-             return res.status(403).json({ message: 'System roles cannot be modified' });
+            return res.status(403).json({ message: 'System roles cannot be modified' });
         }
 
         role.name = req.body.name || role.name;
         role.permissions = req.body.permissions || role.permissions;
-        
+
         const updatedRole = await role.save();
         res.json(updatedRole);
     } catch (error) {
@@ -90,7 +90,7 @@ const getPermissions = async (req, res) => {
             acc[groupName].push(curr);
             return acc;
         }, {});
-        
+
         res.json(grouped);
     } catch (error) {
         console.error(error);
