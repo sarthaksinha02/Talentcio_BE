@@ -22,7 +22,7 @@ const getUsers = async (req, res) => {
 // @route   POST /api/users
 // @access  Private (Admin)
 const createUser = async (req, res) => {
-    const { firstName, lastName, email, password, roleId, department, employeeCode, joiningDate, directReports, reportingManagers } = req.body;
+    const { firstName, lastName, email, password, roleId, department, employmentType, employeeCode, joiningDate, directReports, reportingManagers } = req.body;
     console.log('Create User Body:', req.body); // DEBUG LOG
 
     try {
@@ -46,6 +46,7 @@ const createUser = async (req, res) => {
             company: req.user.company,
             roles: [roleId],
             department,
+            employmentType,
             employeeCode,
             joiningDate,
             reportingManagers: reportingManagers || []
@@ -101,7 +102,7 @@ const updateUserRole = async (req, res) => {
 // @route   PUT /api/users/:id
 // @access  Private (Admin)
 const updateUser = async (req, res) => {
-    const { firstName, lastName, email, password, roleId, department, employeeCode, joiningDate, directReports } = req.body;
+    const { firstName, lastName, email, password, roleId, department, employmentType, employeeCode, joiningDate, directReports } = req.body;
     console.log('Update User Body:', req.body); // DEBUG LOG
     try {
         const user = await User.findById(req.params.id);
@@ -115,6 +116,7 @@ const updateUser = async (req, res) => {
         user.email = email || user.email;
         if (password) user.password = password;
         user.department = department || user.department;
+        user.employmentType = employmentType || user.employmentType;
         user.employeeCode = employeeCode || user.employeeCode;
         if (joiningDate) user.joiningDate = joiningDate;
 

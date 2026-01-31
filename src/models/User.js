@@ -29,6 +29,11 @@ const userSchema = new mongoose.Schema({
         default: true
     },
     department: String,
+    employmentType: {
+        type: String,
+        enum: ['Full Time', 'Part Time', 'Contract', 'Intern', 'Consultant', 'Freelance', 'Probation'],
+        default: 'Full Time'
+    },
     employeeCode: String,
     reportingManagers: [{
         type: mongoose.Schema.Types.ObjectId,

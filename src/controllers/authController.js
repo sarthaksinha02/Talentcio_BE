@@ -77,6 +77,9 @@ const loginUser = async (req, res) => {
                 user.roles.flatMap(role => role.permissions.map(p => p.key))
             )];
 
+            // Check if user has subordinates
+            const directReportsCount = await User.countDocuments({ reportingManagers: user._id });
+
             res.json({
                 _id: user._id,
                 firstName: user.firstName,
@@ -87,6 +90,7 @@ const loginUser = async (req, res) => {
                 reportingManagers: user.reportingManagers,
                 roles: user.roles.map(r => r.name),
                 permissions: permissions,
+                directReportsCount: directReportsCount,
                 token: generateToken(user._id)
             });
         } else {

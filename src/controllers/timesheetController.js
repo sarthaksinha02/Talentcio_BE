@@ -2,7 +2,7 @@ const Timesheet = require('../models/Timesheet');
 const Project = require('../models/Project');
 const User = require('../models/User');
 const Attendance = require('../models/Attendance');
-const { startOfMonth, endOfMonth, format } = require('date-fns');
+const { startOfMonth, endOfMonth, format, startOfDay } = require('date-fns');
 const WorkLog = require('../models/WorkLog');
 
 // @desc    Get Current Month Timesheet
@@ -106,8 +106,8 @@ const getCurrentTimesheet = async (req, res) => {
 const addEntry = async (req, res) => {
     const { date, hours, description, projectId, moduleId, taskId } = req.body;
     try {
-        if (!date || !hours || !projectId) {
-            return res.status(400).json({ message: 'Date, Project, and Hours are required' });
+        if (!date || !hours || !projectId || !taskId) {
+            return res.status(400).json({ message: 'Date, Project, Task, and Hours are required' });
         }
 
         const entryDate = new Date(date);
@@ -126,7 +126,10 @@ const addEntry = async (req, res) => {
         // Check Joining Date
         const isAdmin = req.user.roles.some(r => r.name === 'Admin');
         if (req.user.joiningDate && !isAdmin) {
-            if (entryDate < new Date(req.user.joiningDate)) {
+            const joiningStart = startOfDay(new Date(req.user.joiningDate));
+            const entryStart = startOfDay(entryDate);
+
+            if (entryStart < joiningStart) {
                 return res.status(400).json({ message: 'Cannot add entries before joining date.' });
             }
         }
@@ -471,13 +474,21 @@ const updateEntry = async (req, res) => {
         // Check Joining Date
         if (owner.joiningDate && !isAdmin) {
             // For updateEntry, we check the workLog date
-            if (workLog.date < new Date(owner.joiningDate)) {
+            const joiningStart = startOfDay(new Date(owner.joiningDate));
+            const logStart = startOfDay(workLog.date);
+
+            if (logStart < joiningStart) {
                 return res.status(400).json({ message: 'Cannot edit entries before joining date.' });
             }
         }
 
         if (hours !== undefined) workLog.hours = hours;
         if (description !== undefined) workLog.description = description;
+
+        // Support for changing hierarchy (Task/Project)
+        if (req.body.taskId) workLog.task = req.body.taskId;
+        // Project/Module are inferred from Task, but if we track them in future or validation requires checking:
+        // We only really need to update the Task reference in WorkLog.
 
         if (workLog.status === 'REJECTED') {
             workLog.status = 'PENDING';

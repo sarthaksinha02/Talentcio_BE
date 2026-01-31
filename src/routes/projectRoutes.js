@@ -22,7 +22,7 @@ router.post('/business-units', authorize('business_unit.create'), createBusiness
 router.put('/business-units/:id', authorize('business_unit.update'), updateBusinessUnit);
 
 // Clients
-router.get('/clients', authorize('client.read'), getClients);
+router.get('/clients', getClients);
 router.post('/clients', authorize('client.create'), createClient);
 router.put('/clients/:id', authorize('client.update'), updateClient);
 
