@@ -45,7 +45,11 @@ const updateAttendance = async (req, res) => {
         if (req.user.joiningDate && !isAdmin) {
             // Use new Date(clockIn) or existing attendance.date
             const targetDate = clockIn ? new Date(clockIn) : attendance.date;
-            if (targetDate < new Date(req.user.joiningDate)) {
+
+            const joiningStart = startOfDay(new Date(req.user.joiningDate));
+            const targetStart = startOfDay(targetDate);
+
+            if (targetStart < joiningStart) {
                 return res.status(400).json({ message: 'Cannot edit attendance before joining date.' });
             }
         }
@@ -103,7 +107,9 @@ const createAttendance = async (req, res) => {
 
         // Check Joining Date Restriction
         if (req.user.joiningDate && !isAdmin) {
-            if (attendanceDate < new Date(req.user.joiningDate)) {
+            const joiningStart = startOfDay(new Date(req.user.joiningDate));
+            const attendanceStart = startOfDay(attendanceDate);
+            if (attendanceStart < joiningStart) {
                 return res.status(400).json({ message: 'Cannot create attendance before joining date.' });
             }
         }
@@ -500,9 +506,30 @@ const getTeamAttendanceReport = async (req, res) => {
             }
         }).sort({ date: 1 });
 
+        // 4. Fetch Approved Leaves
+        const Leave = require('../models/LeaveRequest');
+        const leaveRecords = await Leave.find({
+            user: { $in: teamIds },
+            status: 'Approved',
+            $or: [
+                { startDate: { $lte: endDate }, endDate: { $gte: startDate } }
+            ]
+        });
+
+        // 5. Fetch Holidays
+        const Holiday = require('../models/Holiday');
+        const holidays = await Holiday.find({
+            date: {
+                $gte: startDate,
+                $lte: endDate
+            }
+        });
+
         res.json({
             teamMembers,
-            attendanceRecords
+            attendanceRecords,
+            leaveRecords,
+            holidays
         });
 
     } catch (error) {
