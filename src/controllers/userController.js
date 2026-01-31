@@ -181,11 +181,28 @@ const getMyself = async (req, res) => {
     }
 };
 
+const getUserById = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id)
+            .select('-password')
+            .populate('roles', 'name')
+            .populate('reportingManagers', 'firstName lastName email');
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        res.json(user);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
 module.exports = {
     getUsers,
     createUser,
     updateUserRole,
     updateUser,
     getMyTeam,
-    getMyself
+    getMyself,
+    getUserById
 };

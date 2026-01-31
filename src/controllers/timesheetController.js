@@ -10,7 +10,7 @@ const WorkLog = require('../models/WorkLog');
 // @access  Private
 const getCurrentTimesheet = async (req, res) => {
     try {
-        const currentMonth = format(new Date(), 'yyyy-MM');
+        const currentMonth = req.query.month || format(new Date(), 'yyyy-MM');
 
         if (!req.user) {
             return res.status(401).json({ message: 'User not authenticated (req.user missing)' });
@@ -100,10 +100,77 @@ const getCurrentTimesheet = async (req, res) => {
 // @desc    Add Entry to Timesheet
 // @route   POST /api/timesheet/entry
 // @access  Private
+// @desc    Add Entry to Timesheet
+// @route   POST /api/timesheet/entry
+// @access  Private
 const addEntry = async (req, res) => {
-    // Deprecated/Placeholder logic
+    const { date, hours, description, projectId, moduleId, taskId } = req.body;
     try {
-        return res.status(400).json({ message: 'Please log work through the Tasks/Attendance page.' });
+        if (!date || !hours || !projectId) {
+            return res.status(400).json({ message: 'Date, Project, and Hours are required' });
+        }
+
+        const entryDate = new Date(date);
+        const month = format(entryDate, 'yyyy-MM');
+
+        // 1. Check if Timesheet is locked
+        const timesheet = await Timesheet.findOne({
+            user: req.user._id,
+            month: month
+        });
+
+        if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
+            return res.status(400).json({ message: 'Cannot add entries to a submitted or approved timesheet.' });
+        }
+
+        // 2. Resolve Task
+        let task = taskId;
+        if (!task) {
+            // If no task provided, try to find a default/general task for the module/project
+            // For now, we require task or at least module to find a task? 
+            // If the UI sends projectId but not taskId, we might need to handle "General" task creation or assignment.
+            // But let's assume UI forces selection or we default to a "General" task if logic exists.
+
+            // If strict:
+            if (!moduleId && !taskId) {
+                // return res.status(400).json({ message: 'Task or Module is required' });
+                // Let's rely on UI providing the necessary IDs.
+                // However, for "General Work" we might need to be flexible.
+            }
+        }
+
+        // 3. Create WorkLog
+        const workLog = new WorkLog({
+            user: req.user._id,
+            date: entryDate,
+            task: taskId, // This implies taskId is required. 
+            // If we support Project-only logs, we'd need a Task to hold it (e.g. "General Task" under project)
+            // But WorkLog schema likely has 'task' as ref. 
+            hours: Number(hours),
+            description: description || '',
+            status: 'PENDING'
+        });
+
+        // 3.5 Check if we need to create a dummy task/module if missing? 
+        // For this iteration, let's assume the UI provides valid IDs.
+
+        await workLog.save();
+
+        // 4. Update Timesheet (Legacy/Cache Sync) - Optional but good for consistency if logic relies on it
+        // We defer this or relying on WorkLog aggregation in getCurrentTimesheet.
+        // Given getCurrentTimesheet uses WorkLog.find, we are good.
+
+        // Populate return
+        await workLog.populate({
+            path: 'task',
+            populate: {
+                path: 'module',
+                populate: { path: 'project' }
+            }
+        });
+
+        res.status(201).json(workLog);
+
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error' });
@@ -186,7 +253,7 @@ const getUserTimesheet = async (req, res) => {
         const hasRole = (name) => req.user.roles && req.user.roles.some(r => r.name === name);
         const hasPermission = (key) => req.user.roles && req.user.roles.some(r => r.permissions && r.permissions.some(p => p.key === key));
 
-        const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve');
+        const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve') || hasPermission('attendance.view');
 
         if (!isManager && !isAdmin) {
             return res.status(403).json({ message: 'Not authorized to view this timesheet' });

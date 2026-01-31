@@ -94,9 +94,11 @@ const getProjects = async (req, res) => {
         let query = { company: req.user.company };
 
         // Check if user is Admin
-        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+        // Check if user is Admin or has global read permission
+        const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
+            req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
 
-        if (!isAdmin) {
+        if (!canViewAll) {
             // 1. Find Tasks assigned to user to get relevant Module IDs
             // We need to find purely unique modules first to save lookup time
             const assignedModuleIds = await Task.distinct('module', { assignees: req.user._id });
@@ -126,9 +128,34 @@ const getProjectHierarchy = async (req, res) => {
         const { id } = req.params;
         const project = await Project.findOne({ _id: id, company: req.user.company })
             .populate('client', 'name')
-            .populate('manager', 'firstName lastName');
+            .populate('manager', 'firstName lastName')
+            .populate('members', '_id'); // Need IDs to check membership
 
         if (!project) return res.status(404).json({ message: 'Project not found' });
+
+        // Security Check
+        const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
+            req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
+
+        const isManager = project.manager?._id.toString() === req.user._id.toString();
+        const isMember = project.members.some(m => m._id.toString() === req.user._id.toString());
+
+        // Check for assigned tasks if not already authorized
+        let hasAssignedTask = false;
+        if (!canViewAll && !isManager && !isMember) {
+            // Find tasks in this project assigned to user
+            const projectModules = await Module.find({ project: id }).select('_id');
+            const projectModuleIds = projectModules.map(m => m._id);
+            const assignedTask = await Task.findOne({
+                module: { $in: projectModuleIds },
+                assignees: req.user._id
+            });
+            if (assignedTask) hasAssignedTask = true;
+        }
+
+        if (!canViewAll && !isManager && !isMember && !hasAssignedTask) {
+            return res.status(403).json({ message: 'Not authorized to view this project' });
+        }
 
         const modules = await Module.find({ project: id }).sort({ startDate: 1 });
 
@@ -200,7 +227,40 @@ const updateProject = async (req, res) => {
 // --- Modules ---
 const getModules = async (req, res) => {
     try {
-        const modules = await Module.find({ project: req.params.projectId });
+        const { projectId } = req.params;
+
+        // Security Check: Implicit Access
+        const project = await Project.findById(projectId);
+        if (!project) return res.status(404).json({ message: 'Project not found' });
+
+        const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
+            req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
+
+        const isManager = project.manager?.toString() === req.user._id.toString();
+        const isMember = project.members?.some(m => m.toString() === req.user._id.toString());
+
+        let hasAccess = canViewAll || isManager || isMember;
+
+        if (!hasAccess) {
+            // Check if user has ANY task in this project (via modules)
+            // 1. Get all modules for this project
+            const modules = await Module.find({ project: projectId }).select('_id');
+            const moduleIds = modules.map(m => m._id);
+
+            // 2. Check for assigned task in these modules
+            const assignedTask = await Task.findOne({
+                module: { $in: moduleIds },
+                assignees: req.user._id
+            });
+
+            if (assignedTask) hasAccess = true;
+        }
+
+        if (!hasAccess) {
+            return res.status(403).json({ message: 'Not authorized to view modules for this project' });
+        }
+
+        const modules = await Module.find({ project: projectId });
         res.json(modules);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -233,6 +293,34 @@ const getTasks = async (req, res) => {
         const query = {};
         if (req.query.moduleId) query.module = req.query.moduleId;
         if (req.query.assignees) query.assignees = req.query.assignees; // Check assignees array
+
+        // Security: Check permissions
+        const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
+            req.user.roles.some(r => r.permissions.some(p => p.key === 'task.read'));
+
+        if (!canViewAll) {
+            // If not admin/global reader, restrict.
+            // If querying by module, check project access
+            if (req.query.moduleId) {
+                const module = await Module.findById(req.query.moduleId).populate('project');
+                if (module && module.project) {
+                    const project = module.project;
+                    const isManager = project.manager?.toString() === req.user._id.toString();
+                    const isMember = project.members?.some(m => m.toString() === req.user._id.toString());
+
+                    if (!isManager && !isMember) {
+                        // Restrict to assigned tasks only
+                        query.assignees = req.user._id;
+                    }
+                } else {
+                    // Module not found or no project, restrict to assigned
+                    query.assignees = req.user._id;
+                }
+            } else {
+                // No module filter, restrict to assigned tasks
+                query.assignees = req.user._id;
+            }
+        }
 
         const tasks = await Task.find(query)
             .populate('assignees', 'firstName lastName')

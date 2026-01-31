@@ -27,18 +27,18 @@ router.post('/clients', authorize('client.create'), createClient);
 router.put('/clients/:id', authorize('client.update'), updateClient);
 
 // Projects
-router.get('/:id/hierarchy', authorize('project.read'), getProjectHierarchy);
-router.get('/', authorize('project.read'), getProjects);
+router.get('/:id/hierarchy', getProjectHierarchy);
+router.get('/', getProjects);
 router.post('/', authorize('project.create'), createProject);
 router.put('/:id', authorize('project.update'), updateProject);
 
 // Modules
-router.get('/:projectId/modules', authorize('project.read'), getModules);
+router.get('/:projectId/modules', getModules);
 router.post('/modules', authorize('project.create'), createModule);
 router.put('/modules/:id', authorize('project.update'), updateModule);
 
 // Tasks
-router.get('/tasks', authorize('task.read'), getTasks); // /api/projects/tasks?moduleId=...
+router.get('/tasks', getTasks); // /api/projects/tasks?moduleId=...
 router.post('/tasks', authorize('task.create'), createTask);
 router.put('/tasks/:id', authorize('task.update'), updateTask);
 

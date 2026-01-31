@@ -20,7 +20,7 @@ module.exports = [
         module: "USER",
         description: "Deactivate or delete users"
     },
-    
+
     // ROLE MANAGEMENT
     {
         key: "role.create",
@@ -37,7 +37,7 @@ module.exports = [
         module: "ROLE",
         description: "Update roles and permissions"
     },
-    
+
     // TIMESHEET
     {
         key: "timesheet.submit",
@@ -54,12 +54,17 @@ module.exports = [
         module: "TIMESHEET",
         description: "Export timesheet reports"
     },
-    
+
     // ATTENDANCE
     {
         key: "attendance.clock_in",
         module: "ATTENDANCE",
         description: "Clock in and out"
+    },
+    {
+        key: "attendance.view",
+        module: "ATTENDANCE",
+        description: "View entire Attendance Tab and Export"
     },
     {
         key: "attendance.approve",
@@ -143,7 +148,7 @@ module.exports = [
     {
         key: "task.read", // Added for consistency, though usually implies viewing project details
         module: "PROJECT",
-        description: "View tasks" 
+        description: "View tasks"
     },
     {
         key: "task.update",

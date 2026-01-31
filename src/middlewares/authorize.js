@@ -13,15 +13,19 @@ const authorize = (permissionKey) => {
 
         // Check user permissions
         // req.user.roles is populated with permissions
-        const userPermissions = req.user.roles.flatMap(role => 
+        const userPermissions = req.user.roles.flatMap(role =>
             role.permissions.map(p => p.key)
         );
 
-        if (userPermissions.includes(permissionKey)) {
+        const requiredPermissions = Array.isArray(permissionKey) ? permissionKey : [permissionKey];
+
+        const hasPermission = requiredPermissions.some(p => userPermissions.includes(p));
+
+        if (hasPermission) {
             return next();
         } else {
-            return res.status(403).json({ 
-                message: `Forbidden: You do not have permission '${permissionKey}'` 
+            return res.status(403).json({
+                message: `Forbidden: You do not have required permissions: ${requiredPermissions.join(' or ')}`
             });
         }
     };

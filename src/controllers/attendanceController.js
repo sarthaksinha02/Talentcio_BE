@@ -326,18 +326,39 @@ const getMyAttendance = async (req, res) => {
 // @route   GET /api/attendance/history
 // @access  Private
 const getAttendanceByMonth = async (req, res) => {
-    const { year, month } = req.query; // 1-indexed month (1 = Jan)
+    const { year, month, userId } = req.query; // 1-indexed month (1 = Jan)
 
     if (!year || !month) {
         return res.status(400).json({ message: 'Year and month are required' });
     }
 
     try {
+        let targetUserId = req.user._id;
+
+        // processing for view other user
+        if (userId && userId !== req.user._id.toString()) {
+            // Check Authorization
+            const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+
+            // Allow if Admin
+            if (isAdmin) {
+                targetUserId = userId;
+            } else {
+                // Allow if Manager
+                const targetUser = await User.findById(userId);
+                if (targetUser && targetUser.reportingManagers.some(m => m.toString() === req.user._id.toString())) {
+                    targetUserId = userId;
+                } else {
+                    return res.status(403).json({ message: 'Not authorized to view this user\'s attendance' });
+                }
+            }
+        }
+
         const startDate = new Date(Date.UTC(year, month - 1, 1));
         const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59));
 
         const attendance = await Attendance.find({
-            user: req.user._id,
+            user: targetUserId,
             date: {
                 $gte: startDate,
                 $lte: endDate
