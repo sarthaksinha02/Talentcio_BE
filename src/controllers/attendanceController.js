@@ -41,14 +41,23 @@ const updateAttendance = async (req, res) => {
             return res.status(400).json({ message: 'Cannot edit attendance for a submitted or approved timesheet.' });
         }
 
+        // Check Joining Date Restriction
+        if (req.user.joiningDate && !isAdmin) {
+            // Use new Date(clockIn) or existing attendance.date
+            const targetDate = clockIn ? new Date(clockIn) : attendance.date;
+            if (targetDate < new Date(req.user.joiningDate)) {
+                return res.status(400).json({ message: 'Cannot edit attendance before joining date.' });
+            }
+        }
+
         if (clockIn) {
             attendance.clockIn = new Date(clockIn);
-            attendance.clockInIST = new Date(clockIn).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' });
+            attendance.clockInIST = new Date(clockIn).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
         }
 
         if (clockOut) {
             attendance.clockOut = new Date(clockOut);
-            attendance.clockOutIST = new Date(clockOut).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' });
+            attendance.clockOutIST = new Date(clockOut).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
         }
 
         await attendance.save();
@@ -92,6 +101,13 @@ const createAttendance = async (req, res) => {
             return res.status(400).json({ message: 'Cannot add attendance to a submitted or approved timesheet.' });
         }
 
+        // Check Joining Date Restriction
+        if (req.user.joiningDate && !isAdmin) {
+            if (attendanceDate < new Date(req.user.joiningDate)) {
+                return res.status(400).json({ message: 'Cannot create attendance before joining date.' });
+            }
+        }
+
         // Check duplicate
         const start = startOfDay(attendanceDate);
         const end = endOfDay(attendanceDate);
@@ -113,8 +129,8 @@ const createAttendance = async (req, res) => {
             status: 'PRESENT',
             clockIn: clockIn ? new Date(clockIn) : null,
             clockOut: clockOut ? new Date(clockOut) : null,
-            clockInIST: clockIn ? new Date(clockIn).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' }) : null,
-            clockOutIST: clockOut ? new Date(clockOut).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata' }) : null,
+            clockInIST: clockIn ? new Date(clockIn).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : null,
+            clockOutIST: clockOut ? new Date(clockOut).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : null,
             isManualEntry: true
         });
 
@@ -170,6 +186,11 @@ const clockIn = async (req, res) => {
     try {
         const today = getStartOfDayIST();
 
+        // Check Joining Date
+        if (req.user.joiningDate && today < new Date(req.user.joiningDate)) {
+            return res.status(400).json({ message: 'Cannot clock in before joining date.' });
+        }
+
         // Check if already exists for today (IST)
         let attendance = await Attendance.findOne({
             user: req.user._id,
@@ -211,6 +232,11 @@ const clockIn = async (req, res) => {
 const clockOut = async (req, res) => {
     try {
         const today = getStartOfDayIST();
+
+        // Check Joining Date
+        if (req.user.joiningDate && today < new Date(req.user.joiningDate)) {
+            return res.status(400).json({ message: 'Cannot clock out before joining date.' });
+        }
 
         let attendance = await Attendance.findOne({
             user: req.user._id,
@@ -433,6 +459,58 @@ const getPendingRequests = async (req, res) => {
     }
 };
 
+// @desc    Get Team Attendance Report (For Excel Export)
+// @route   GET /api/attendance/team-report
+// @access  Private
+const getTeamAttendanceReport = async (req, res) => {
+    const { year, month } = req.query;
+    try {
+        if (!year || !month) return res.status(400).json({ message: 'Year and month required' });
+
+        // 1. Find Subordinates & Self if Admin/Manager
+        const User = require('../models/User');
+
+        let teamIds = [];
+        if (req.user.roles.some(r => r.name === 'Admin')) {
+            const allUsers = await User.find({}).select('_id');
+            teamIds = allUsers.map(u => u._id);
+        } else {
+            const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
+            teamIds = subordinates.map(u => u._id);
+        }
+
+        if (teamIds.length === 0) {
+            return res.json({ teamMembers: [], attendanceRecords: [] });
+        }
+
+        // 2. Fetch Users
+        const teamMembers = await User.find({ _id: { $in: teamIds } })
+            .select('firstName lastName employeeCode joiningDate email')
+            .sort({ firstName: 1 });
+
+        // 3. Fetch Attendance
+        const startDate = new Date(Date.UTC(year, month - 1, 1));
+        const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+
+        const attendanceRecords = await Attendance.find({
+            user: { $in: teamIds },
+            date: {
+                $gte: startDate,
+                $lte: endDate
+            }
+        }).sort({ date: 1 });
+
+        res.json({
+            teamMembers,
+            attendanceRecords
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
 module.exports = {
     getTodayStatus,
     clockIn,
@@ -442,5 +520,6 @@ module.exports = {
     approveAttendance,
     getPendingRequests,
     updateAttendance,
-    createAttendance
+    createAttendance,
+    getTeamAttendanceReport
 };

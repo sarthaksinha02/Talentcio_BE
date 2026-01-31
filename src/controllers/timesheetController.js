@@ -123,6 +123,14 @@ const addEntry = async (req, res) => {
             return res.status(400).json({ message: 'Cannot add entries to a submitted or approved timesheet.' });
         }
 
+        // Check Joining Date
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+        if (req.user.joiningDate && !isAdmin) {
+            if (entryDate < new Date(req.user.joiningDate)) {
+                return res.status(400).json({ message: 'Cannot add entries before joining date.' });
+            }
+        }
+
         // 2. Resolve Task
         let task = taskId;
         if (!task) {
@@ -457,6 +465,14 @@ const updateEntry = async (req, res) => {
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
             if (!isManager && !isAdmin) {
                 return res.status(400).json({ message: 'Cannot edit submitted/approved timesheets' });
+            }
+        }
+
+        // Check Joining Date
+        if (owner.joiningDate && !isAdmin) {
+            // For updateEntry, we check the workLog date
+            if (workLog.date < new Date(owner.joiningDate)) {
+                return res.status(400).json({ message: 'Cannot edit entries before joining date.' });
             }
         }
 
