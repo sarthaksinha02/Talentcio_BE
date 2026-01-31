@@ -49,7 +49,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/holidays', holidayRoutes);
 
 app.get('/', (req, res) => {
-    res.json({ message: 'HRCODE API is running' });
+    res.json({ message: 'TalentCio API is running' });
 });
 
 // Start Server
