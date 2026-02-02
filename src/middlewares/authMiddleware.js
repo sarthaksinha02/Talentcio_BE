@@ -15,7 +15,7 @@ const protect = async (req, res, next) => {
             // Verify token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-            // Get user from the token (exclude password) and populate roles
+            // Get user from the token
             req.user = await User.findById(decoded.id)
                 .select('-password')
                 .populate({
@@ -27,6 +27,15 @@ const protect = async (req, res, next) => {
 
             if (!req.user) {
                 return res.status(401).json({ message: 'Not authorized, user not found' });
+            }
+
+            // Check Token Version
+            // Treat missing version as 0 for backward compatibility during migration
+            const tokenVersion = decoded.tokenVersion || 0;
+            const userVersion = req.user.tokenVersion || 0;
+
+            if (tokenVersion !== userVersion) {
+                return res.status(401).json({ message: 'Not authorized, session expired (Role/Permission changed)' });
             }
 
             next();

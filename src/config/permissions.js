@@ -129,9 +129,29 @@ module.exports = [
         description: "View projects"
     },
     {
+        key: "project.hierarchy",
+        module: "PROJECT",
+        description: "View Project Hierarchy"
+    },
+    {
+        key: "project.view_work_logs",
+        module: "PROJECT",
+        description: "View Work Logs & Progress in Hierarchy"
+    },
+    {
         key: "project.update",
         module: "PROJECT",
         description: "Update projects"
+    },
+    {
+        key: "project.delete",
+        module: "PROJECT",
+        description: "Delete projects"
+    },
+    {
+        key: "module.delete",
+        module: "PROJECT",
+        description: "Delete modules"
     },
     {
         key: "project.export_report",
@@ -154,5 +174,10 @@ module.exports = [
         key: "task.update",
         module: "PROJECT",
         description: "Update tasks"
+    },
+    {
+        key: "task.delete",
+        module: "PROJECT",
+        description: "Delete tasks"
     }
 ];

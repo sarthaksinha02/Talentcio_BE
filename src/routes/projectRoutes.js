@@ -5,9 +5,9 @@ const { authorize } = require('../middlewares/authorize');
 const {
     getBusinessUnits, createBusinessUnit, updateBusinessUnit,
     getClients, createClient, updateClient,
-    getProjects, createProject, updateProject, getProjectHierarchy,
-    getModules, createModule, updateModule,
-    getTasks, createTask, updateTask,
+    getProjects, createProject, updateProject, deleteProject, getProjectHierarchy,
+    getModules, createModule, updateModule, deleteModule,
+    getTasks, createTask, updateTask, deleteTask,
     getEmployees
 } = require('../controllers/projectController');
 
@@ -31,16 +31,19 @@ router.get('/:id/hierarchy', getProjectHierarchy);
 router.get('/', getProjects);
 router.post('/', authorize('project.create'), createProject);
 router.put('/:id', authorize('project.update'), updateProject);
+router.delete('/:id', authorize('project.delete'), deleteProject);
 
 // Modules
 router.get('/:projectId/modules', getModules);
 router.post('/modules', authorize('project.create'), createModule);
 router.put('/modules/:id', authorize('project.update'), updateModule);
+router.delete('/modules/:id', authorize('module.delete'), deleteModule);
 
 // Tasks
 router.get('/tasks', getTasks); // /api/projects/tasks?moduleId=...
 router.post('/tasks', authorize('task.create'), createTask);
 router.put('/tasks/:id', authorize('task.update'), updateTask);
+router.delete('/tasks/:id', authorize('task.delete'), deleteTask);
 
 // Work Logs
 // Work Logs

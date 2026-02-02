@@ -39,7 +39,11 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     }],
-    joiningDate: Date
+    joiningDate: Date,
+    tokenVersion: {
+        type: Number,
+        default: 0
+    }
 }, { timestamps: true });
 
 // Encrypt password before save
