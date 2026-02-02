@@ -351,21 +351,74 @@ const getUserTimesheet = async (req, res) => {
 // @desc    Get Pending Timesheets (Manager View)
 // @route   GET /api/timesheet/approvals
 // @access  Private
+// @desc    Get Pending Timesheets (Manager View)
+// @route   GET /api/timesheet/approvals
+// @access  Private
 const getPendingTimesheets = async (req, res) => {
     try {
         if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
 
-        // Find subordinates (where I am one of the reporting managers)
-        const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
-        const subordinateIds = subordinates.map(u => u._id);
+        let timesheets;
 
-        const timesheets = await Timesheet.find({
-            user: { $in: subordinateIds },
-            status: 'SUBMITTED'
-        }).populate('user', 'firstName lastName email employeeCode')
-            .sort({ month: -1 });
+        // Check if user is Admin
+        // req.user.roles is populated with Role objects
+        const isAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Admin');
 
-        res.json(timesheets);
+        if (isAdmin) {
+            // Admin sees ALL submitted timesheets
+            timesheets = await Timesheet.find({
+                status: 'SUBMITTED'
+            }).populate('user', 'firstName lastName email employeeCode')
+                .sort({ month: -1 });
+        } else {
+            // Regular Manager: Find subordinates (where I am one of the reporting managers)
+            const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
+            const subordinateIds = subordinates.map(u => u._id);
+
+            timesheets = await Timesheet.find({
+                user: { $in: subordinateIds },
+                status: 'SUBMITTED'
+            }).populate('user', 'firstName lastName email employeeCode')
+                .sort({ month: -1 });
+        }
+
+        // Enrich with Entries
+        const enrichedTimesheets = await Promise.all(timesheets.map(async (ts) => {
+            const [year, month] = ts.month.split('-');
+            const start = startOfMonth(new Date(parseInt(year), parseInt(month) - 1));
+            const end = endOfMonth(new Date(parseInt(year), parseInt(month) - 1));
+
+            const workLogs = await WorkLog.find({
+                user: ts.user._id,
+                date: { $gte: start, $lte: end }
+            }).populate({
+                path: 'task',
+                populate: {
+                    path: 'module',
+                    populate: { path: 'project' }
+                }
+            }).sort({ date: 1 });
+
+            const entries = workLogs.map(log => ({
+                _id: log._id,
+                date: log.date,
+                project: log.task?.module?.project || { name: 'Unknown Project' },
+                module: log.task?.module,
+                task: log.task,
+                taskName: log.task?.name,
+                hours: log.hours,
+                description: log.description,
+                status: log.status,
+                rejectionReason: log.rejectionReason
+            }));
+
+            return {
+                ...ts.toObject(),
+                entries
+            };
+        }));
+
+        res.json(enrichedTimesheets);
     } catch (error) {
         console.error('getPendingTimesheets Error:', error);
         res.status(500).json({ message: 'Server Error' });

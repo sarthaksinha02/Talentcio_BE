@@ -89,6 +89,7 @@ const updateUserRole = async (req, res) => {
         }
 
         user.roles = [roleId];
+        user.tokenVersion = (user.tokenVersion || 0) + 1;
         await user.save();
 
         res.json({ message: 'User role updated' });
@@ -121,9 +122,14 @@ const updateUser = async (req, res) => {
         if (joiningDate) user.joiningDate = joiningDate;
 
         if (roleId) {
-            const role = await Role.findById(roleId);
-            if (role && (role.company.toString() === req.user.company.toString() || role.isSystem)) {
-                user.roles = [roleId];
+            // Only update role if it's different and valid
+            const currentRoleId = user.roles && user.roles.length > 0 ? user.roles[0].toString() : null;
+            if (currentRoleId !== roleId) {
+                const role = await Role.findById(roleId);
+                if (role && (role.company.toString() === req.user.company.toString() || role.isSystem)) {
+                    user.roles = [roleId];
+                    user.tokenVersion = (user.tokenVersion || 0) + 1;
+                }
             }
         }
 

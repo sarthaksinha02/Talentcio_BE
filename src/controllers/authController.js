@@ -3,9 +3,9 @@ const Company = require('../models/Company');
 const jwt = require('jsonwebtoken');
 
 // Generate JWT Helper
-const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, {
-        expiresIn: '30d'
+const generateToken = (id, tokenVersion) => {
+    return jwt.sign({ id, tokenVersion }, process.env.JWT_SECRET, {
+        expiresIn: '7d'
     });
 };
 
@@ -46,7 +46,8 @@ const registerCompany = async (req, res) => {
                 firstName: user.firstName,
                 email: user.email,
                 company: company.name,
-                token: generateToken(user._id)
+                company: company.name,
+                token: generateToken(user._id, user.tokenVersion)
             });
         } else {
             res.status(400).json({ message: 'Invalid user data' });
@@ -73,9 +74,19 @@ const loginUser = async (req, res) => {
 
         if (user && (await user.matchPassword(password))) {
             // Flatten unique permissions
-            const permissions = [...new Set(
+            let permissions = [...new Set(
                 user.roles.flatMap(role => role.permissions.map(p => p.key))
             )];
+
+            // Wildcard Expansion: If user has '*', provide ALL permissions
+            if (permissions.includes('*')) {
+                const Permission = require('../models/Permission');
+                const allPermissions = await Permission.find({});
+
+                // Add all permission keys
+                const allKeys = allPermissions.map(p => p.key);
+                permissions = [...new Set([...permissions, ...allKeys])];
+            }
 
             // Check if user has subordinates
             const directReportsCount = await User.countDocuments({ reportingManagers: user._id });
@@ -91,7 +102,8 @@ const loginUser = async (req, res) => {
                 roles: user.roles.map(r => r.name),
                 permissions: permissions,
                 directReportsCount: directReportsCount,
-                token: generateToken(user._id)
+                directReportsCount: directReportsCount,
+                token: generateToken(user._id, user.tokenVersion)
             });
         } else {
             res.status(401).json({ message: 'Invalid email or password' });

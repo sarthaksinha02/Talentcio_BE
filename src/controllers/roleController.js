@@ -1,5 +1,6 @@
 const Role = require('../models/Role');
 const Permission = require('../models/Permission');
+const User = require('../models/User');
 
 // @desc    Get All Roles
 // @route   GET /api/roles
@@ -59,6 +60,13 @@ const updateRole = async (req, res) => {
         role.permissions = req.body.permissions || role.permissions;
 
         const updatedRole = await role.save();
+
+        // Auto-logout users with this role by incrementing their tokenVersion
+        await User.updateMany(
+            { roles: role._id },
+            { $inc: { tokenVersion: 1 } }
+        );
+
         res.json(updatedRole);
     } catch (error) {
         console.error('UPDATE ROLE ERROR:', error);
@@ -71,7 +79,10 @@ const updateRole = async (req, res) => {
 // @access  Private
 const getPermissions = async (req, res) => {
     try {
-        const permissions = await Permission.find({});
+        let permissions = await Permission.find({});
+        // Explicit filter
+        permissions = permissions.filter(p => p.key !== '*');
+        console.log(`Fetching permissions for UI. Count after filter: ${permissions.length}`);
         // Group permissions by module for easier frontend display
         const grouped = permissions.reduce((acc, curr) => {
             let groupName = curr.module || 'OTHER';

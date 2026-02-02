@@ -161,19 +161,47 @@ const getProjectHierarchy = async (req, res) => {
 
         // Fetch all tasks for these modules
         const moduleIds = modules.map(m => m._id);
-        const tasks = await Task.find({ module: { $in: moduleIds } })
+
+        // Filter: If not Admin/Manager/Member, restrict to assigned tasks
+        let taskQuery = { module: { $in: moduleIds } };
+        if (!canViewAll && !isManager && !isMember) {
+            taskQuery.assignees = req.user._id;
+        }
+
+        const tasks = await Task.find(taskQuery)
             .populate('assignees', 'firstName lastName')
             .sort({ startDate: 1 });
 
         // Fetch Work Logs for these tasks
-        // We need WorkLog model here, require it at top if not present, but for now I'll use mongoose.model
-        // Better to add require at top, but I can use mongoose.model('WorkLog') if model is registered.
-        // Let's assume WorkLog is registered in server.js (it was in server.js view)
+        // We need WorkLog model here
         const WorkLog = require('../models/WorkLog'); // Ensure this is imported or use mongoose.model
         const taskIds = tasks.map(t => t._id);
-        const workLogs = await WorkLog.find({ task: { $in: taskIds } })
-            .populate('user', 'firstName lastName')
-            .sort({ date: -1 });
+
+        let workLogs = [];
+        const canViewWorkLogs = canViewAll ||
+            req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_work_logs'));
+
+        // Logic: 
+        // 1. Admin/Global Read -> See all.
+        // 2. Has project.view_work_logs -> See all.
+        // 3. Manager/Member -> See all (Usually they need context).
+        // 4. Assigned User (No other permission) -> DOES NOT SEE LOGS (as requested).
+
+        // Wait, current logic for canViewAll handles Admin/project.read.
+        // Let's refine based on "employee can see hierarchy NOT work log".
+        // If I am just an assigned user (not manager/member), I shouldn't see logs of others or maybe even mine if that's the strict request.
+        // But usually one sees their own. The user said "not the work log on that project" (singular/general).
+        // I will hide ALL logs if not authorized.
+
+        if (canViewWorkLogs || isManager || isMember) {
+            workLogs = await WorkLog.find({ task: { $in: taskIds } })
+                .populate('user', 'firstName lastName')
+                .sort({ date: -1 });
+        } else {
+            // User can see the hierarchy (modules/tasks) but NOT the work logs.
+            // We return empty logs.
+            workLogs = [];
+        }
 
         // Structure the response
         const hierarchy = {
@@ -221,6 +249,33 @@ const updateProject = async (req, res) => {
         res.json(project);
     } catch (error) {
         res.status(400).json({ message: error.message });
+    }
+};
+
+const deleteProject = async (req, res) => {
+    try {
+        const project = await Project.findOneAndDelete({ _id: req.params.id, company: req.user.company });
+        if (!project) return res.status(404).json({ message: 'Project not found' });
+
+        // Cascade Delete
+        const modules = await Module.find({ project: project._id });
+        const moduleIds = modules.map(m => m._id);
+
+        if (moduleIds.length > 0) {
+            const tasks = await Task.find({ module: { $in: moduleIds } });
+            const taskIds = tasks.map(t => t._id);
+
+            const WorkLog = require('../models/WorkLog');
+            if (taskIds.length > 0) {
+                await WorkLog.deleteMany({ task: { $in: taskIds } });
+            }
+            await Task.deleteMany({ module: { $in: moduleIds } });
+            await Module.deleteMany({ project: project._id });
+        }
+
+        res.json({ message: 'Project and associated data deleted' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
     }
 };
 
@@ -283,6 +338,27 @@ const updateModule = async (req, res) => {
         res.json(module);
     } catch (error) {
         res.status(400).json({ message: error.message });
+    }
+};
+
+const deleteModule = async (req, res) => {
+    try {
+        const module = await Module.findByIdAndDelete(req.params.id);
+        if (!module) return res.status(404).json({ message: 'Module not found' });
+
+        // Cascade Delete
+        const tasks = await Task.find({ module: module._id });
+        const taskIds = tasks.map(t => t._id);
+
+        const WorkLog = require('../models/WorkLog');
+        if (taskIds.length > 0) {
+            await WorkLog.deleteMany({ task: { $in: taskIds } });
+        }
+        await Task.deleteMany({ module: module._id });
+
+        res.json({ message: 'Module and tasks deleted' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
     }
 };
 
@@ -357,11 +433,25 @@ const updateTask = async (req, res) => {
     }
 };
 
+const deleteTask = async (req, res) => {
+    try {
+        const task = await Task.findByIdAndDelete(req.params.id);
+        if (!task) return res.status(404).json({ message: 'Task not found' });
+
+        const WorkLog = require('../models/WorkLog');
+        await WorkLog.deleteMany({ task: task._id });
+
+        res.json({ message: 'Task deleted' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     getBusinessUnits, createBusinessUnit, updateBusinessUnit,
     getClients, createClient, updateClient,
-    getProjects, createProject, updateProject, getProjectHierarchy,
-    getModules, createModule, updateModule,
-    getTasks, createTask, updateTask,
+    getProjects, createProject, updateProject, deleteProject, getProjectHierarchy,
+    getModules, createModule, updateModule, deleteModule,
+    getTasks, createTask, updateTask, deleteTask,
     getEmployees
 };
