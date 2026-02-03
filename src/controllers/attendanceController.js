@@ -77,7 +77,7 @@ const updateAttendance = async (req, res) => {
 // @route   POST /api/attendance
 // @access  Private
 const createAttendance = async (req, res) => {
-    const { date, clockIn, clockOut } = req.body;
+    const { date, clockIn, clockOut, userId } = req.body;
     try {
         if (!date) {
             return res.status(400).json({ message: 'Date is required' });
@@ -97,17 +97,26 @@ const createAttendance = async (req, res) => {
             return res.status(403).json({ message: 'You do not have permission to create attendance records.' });
         }
 
+        // Target User
+        let targetUserId = req.user._id;
+        if (userId && isAdmin) {
+            targetUserId = userId;
+        }
+
         // Check lock status via Timesheet
         const month = attendanceDate.toISOString().slice(0, 7); // YYYY-MM
-        const timesheet = await Timesheet.findOne({ user: req.user._id, month });
+        const timesheet = await Timesheet.findOne({ user: targetUserId, month });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-            return res.status(400).json({ message: 'Cannot add attendance to a submitted or approved timesheet.' });
+            if (!isAdmin) {
+                return res.status(400).json({ message: 'Cannot add attendance to a submitted or approved timesheet.' });
+            }
         }
 
         // Check Joining Date Restriction
-        if (req.user.joiningDate && !isAdmin) {
-            const joiningStart = startOfDay(new Date(req.user.joiningDate));
+        const targetUser = await User.findById(targetUserId); // Need to fetch target user if overridden
+        if (targetUser?.joiningDate && !isAdmin) {
+            const joiningStart = startOfDay(new Date(targetUser.joiningDate));
             const attendanceStart = startOfDay(attendanceDate);
             if (attendanceStart < joiningStart) {
                 return res.status(400).json({ message: 'Cannot create attendance before joining date.' });
@@ -119,7 +128,7 @@ const createAttendance = async (req, res) => {
         const end = endOfDay(attendanceDate);
 
         const existing = await Attendance.findOne({
-            user: req.user._id,
+            user: targetUserId,
             date: { $gte: start, $lte: end }
         });
 
@@ -129,7 +138,7 @@ const createAttendance = async (req, res) => {
 
         // Create
         const newAttendance = new Attendance({
-            user: req.user._id,
+            user: targetUserId,
             company: req.user.company,
             date: attendanceDate,
             status: 'PRESENT',
