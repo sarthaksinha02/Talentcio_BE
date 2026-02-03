@@ -100,34 +100,48 @@ const getCurrentTimesheet = async (req, res) => {
 // @desc    Add Entry to Timesheet
 // @route   POST /api/timesheet/entry
 // @access  Private
-// @desc    Add Entry to Timesheet
-// @route   POST /api/timesheet/entry
-// @access  Private
 const addEntry = async (req, res) => {
-    const { date, hours, description, projectId, moduleId, taskId } = req.body;
+    const { date: entryDate, hours, description, projectId, moduleId, taskId, userId } = req.body;
+
     try {
-        if (!date || !hours || !projectId || !taskId) {
+        // 1. Resolve Target User
+        let targetUserId = req.user._id;
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+
+        if (userId && isAdmin) {
+            targetUserId = userId;
+        }
+
+        // Validate Date and other required fields
+        if (!entryDate || !hours || !projectId || !taskId) {
             return res.status(400).json({ message: 'Date, Project, Task, and Hours are required' });
         }
 
-        const entryDate = new Date(date);
-        const month = format(entryDate, 'yyyy-MM');
-
-        // 1. Check if Timesheet is locked
+        // Check for Existing Timesheet Logic
+        const month = format(new Date(entryDate), 'yyyy-MM');
         const timesheet = await Timesheet.findOne({
-            user: req.user._id,
+            user: targetUserId,
             month: month
         });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-            return res.status(400).json({ message: 'Cannot add entries to a submitted or approved timesheet.' });
+            // Admin can bypass this check if needed, but usually submitted timesheets shouldn't be touched unless rejected/reverted.
+            // Let's allow Admin to edit even if submitted? Or maybe restrict adding to DRAFT only.
+            // Requirement was "Admin can edit". Let's imply adding too.
+            // However, typically one edits a submitted timesheet by rejecting it first.
+            // Unless "Edit" implies correcting data without rejection flow.
+            // Let's allow Admin to add even if submitted, but warn or log.
+            if (!isAdmin) {
+                return res.status(400).json({ message: 'Cannot add entries to a submitted or approved timesheet.' });
+            }
         }
 
         // Check Joining Date
-        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
-        if (req.user.joiningDate && !isAdmin) {
-            const joiningStart = startOfDay(new Date(req.user.joiningDate));
-            const entryStart = startOfDay(entryDate);
+        const targetUser = await User.findById(targetUserId);
+
+        if (targetUser?.joiningDate && !isAdmin) {
+            const joiningStart = startOfDay(new Date(targetUser.joiningDate));
+            const entryStart = startOfDay(new Date(entryDate));
 
             if (entryStart < joiningStart) {
                 return res.status(400).json({ message: 'Cannot add entries before joining date.' });
@@ -152,7 +166,7 @@ const addEntry = async (req, res) => {
 
         // 3. Create WorkLog
         const workLog = new WorkLog({
-            user: req.user._id,
+            user: targetUserId,
             date: entryDate,
             task: taskId, // This implies taskId is required. 
             // If we support Project-only logs, we'd need a Task to hold it (e.g. "General Task" under project)

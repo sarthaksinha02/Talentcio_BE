@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const Attendance = require('../models/Attendance');
-const Project = require('../models/Project'); // Optional, if we want project stats
+const Project = require('../models/Project');
 
 // @desc    Get Dashboard Statistics
 // @route   GET /api/dashboard
@@ -37,25 +37,54 @@ const getDashboardStats = async (req, res) => {
             approvalStatus: 'PENDING'
         });
 
-        // 4. Recent Activity (Last 5 Check-ins)
-        const recentActivity = await Attendance.find({
+        // 4. Daily Attendance List (All Employees)
+        const allUsers = await User.find({
             company: companyId,
-            clockIn: { $exists: true }
-        })
-            .sort({ clockIn: -1 })
-            .limit(5)
-            .populate('user', 'firstName lastName employeeCode department');
+            isActive: true
+        }).select('firstName lastName employeeCode department');
 
-        // Transform Recent Activity
-        const recentActivityFormatted = recentActivity.map(record => ({
-            id: record._id,
-            user: {
-                name: `${record.user.firstName} ${record.user.lastName}`,
-                role: record.user.department || 'Employee', // Fallback
-                avatar: null // Placeholder
-            },
-            time: record.clockIn,
-            status: record.status
+        const todaysAttendance = await Attendance.find({
+            company: companyId,
+            date: { $gte: today, $lt: tomorrow }
+        });
+
+        // Map users to status
+        const dailyStatusList = allUsers.map(user => {
+            const record = todaysAttendance.find(a => a.user.toString() === user._id.toString());
+            let status = 'ABSENT';
+            let checkInTime = null;
+
+            if (record) {
+                status = record.status || 'PRESENT';
+                checkInTime = record.clockIn;
+            }
+
+            return {
+                id: user._id,
+                user: {
+                    name: `${user.firstName} ${user.lastName}`,
+                    role: user.department || 'Employee',
+                    avatar: null
+                },
+                time: checkInTime,
+                status: status
+            };
+        });
+
+        // 5. All Projects
+        const allProjects = await Project.find({
+            company: companyId
+        })
+            .sort({ updatedAt: -1 })
+            .limit(10)
+            .select('name isActive dueDate'); // status is not in schema, using isActive
+
+        // Map projects to ensure safe structure
+        const projectsFormatted = allProjects.map(p => ({
+            _id: p._id,
+            name: p.name,
+            status: p.isActive ? 'Active' : 'Inactive',
+            deadline: p.dueDate
         }));
 
         res.json({
@@ -65,7 +94,8 @@ const getDashboardStats = async (req, res) => {
                 absentToday,
                 pendingRequests
             },
-            recentActivity: recentActivityFormatted
+            recentActivity: dailyStatusList,
+            projects: projectsFormatted
         });
 
     } catch (error) {
