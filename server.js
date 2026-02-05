@@ -15,6 +15,7 @@ require('./src/models/Company');
 require('./src/models/Permission');
 require('./src/models/Role');
 require('./src/models/User');
+require('./src/models/EmployeeProfile');
 require('./src/models/AuditLog');
 require('./src/models/Attendance');
 require('./src/models/Project');
@@ -36,6 +37,7 @@ const projectRoutes = require('./src/routes/projectRoutes');
 const dashboardRoutes = require('./src/routes/dashboardRoutes');
 const holidayRoutes = require('./src/routes/holidayRoutes');
 const leaveRoutes = require('./src/routes/leaveRoutes');
+const dossierRoutes = require('./src/routes/dossierRoutes');
 
 // Database Connection & Init
 const initServer = async () => {
@@ -53,6 +55,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/holidays', holidayRoutes);
 app.use('/api/leaves', leaveRoutes);
+app.use('/api/dossier', dossierRoutes);
 
 app.get('/', (req, res) => {
     res.json({ message: 'TalentCio API is running' });
