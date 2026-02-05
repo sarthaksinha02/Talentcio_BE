@@ -40,6 +40,15 @@ const userSchema = new mongoose.Schema({
         ref: 'User'
     }],
     joiningDate: Date,
+    employeeProfile: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'EmployeeProfile'
+    },
+    dossierStatus: {
+        type: String,
+        enum: ['Incomplete', 'Pending Verification', 'Verified'],
+        default: 'Incomplete'
+    },
     tokenVersion: {
         type: Number,
         default: 0
