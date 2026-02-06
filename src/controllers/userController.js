@@ -8,9 +8,9 @@ const getUsers = async (req, res) => {
     try {
         const users = await User.find({ company: req.user.company })
             .select('-password')
-            .select('-password')
             .populate('roles', 'name')
-            .populate('reportingManagers', 'firstName lastName email');
+            .populate('reportingManagers', 'firstName lastName email')
+            .populate('employeeProfile', 'hris');
         res.json(users);
     } catch (error) {
         console.error(error);
@@ -163,7 +163,8 @@ const getMyTeam = async (req, res) => {
         const team = await User.find({ reportingManagers: req.user._id })
             .select('-password')
             .populate('roles', 'name')
-            .populate('reportingManagers', 'firstName lastName email');
+            .populate('reportingManagers', 'firstName lastName email')
+            .populate('employeeProfile', 'hris');
         res.json(team);
     } catch (error) {
         console.error(error);

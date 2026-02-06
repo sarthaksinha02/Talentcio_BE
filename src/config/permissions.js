@@ -179,5 +179,22 @@ module.exports = [
         key: "task.delete",
         module: "PROJECT",
         description: "Delete tasks"
+    },
+
+    // EMPLOYEE DOSSIER
+    {
+        key: "dossier.edit",
+        module: "DOSSIER",
+        description: "Edit employee dossier details"
+    },
+    {
+        key: "dossier.edit.sensitive",
+        module: "DOSSIER",
+        description: "Edit sensitive dossier details (Identity, Employment)"
+    },
+    {
+        key: "dossier.approve",
+        module: "DOSSIER",
+        description: "Approve HRIS changes"
     }
 ];
