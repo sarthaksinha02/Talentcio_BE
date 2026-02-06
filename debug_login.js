@@ -22,7 +22,7 @@ const logFile = 'debug_login_out.txt';
 const req = http.request(options, (res) => {
   console.log(`STATUS: ${res.statusCode}`);
   fs.writeFileSync(logFile, `STATUS: ${res.statusCode}\n`);
-  
+
   let body = '';
   res.on('data', (d) => {
     body += d;

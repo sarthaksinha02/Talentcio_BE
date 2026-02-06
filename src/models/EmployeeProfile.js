@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const AddressSchema = new mongoose.Schema({
-    type: { type: String, enum: ['Current', 'Permanent'] },
+    type: { type: String, enum: ['Current', 'Permanent', 'Mailing'] },
     street: String,
     addressLine2: String,
     city: String,
@@ -16,16 +16,28 @@ const WorkHistorySchema = new mongoose.Schema({
     designation: String,
     startDate: Date,
     endDate: Date,
-    reasonForLeaving: String
+    reasonForLeaving: String,
+    totalExperience: String // e.g. "2 years 4 months"
 });
 
 const EducationSchema = new mongoose.Schema({
     institution: String,
+    courseName: String, // B.Tech / M.Tech / MCA / BCA
+    university: String,
     degree: String,
     fieldOfStudy: String,
     startDate: Date,
     endDate: Date,
-    grade: String
+    grade: String, // A+ / A / B+ / B etc.
+    rank: String,
+    collegeRank: String,
+    fromDate: Date,
+    toDate: Date
+});
+
+const ChildSchema = new mongoose.Schema({
+    name: String,
+    dob: Date
 });
 
 const employeeProfileSchema = new mongoose.Schema({
@@ -34,9 +46,14 @@ const employeeProfileSchema = new mongoose.Schema({
 
     // --- Personal Information ---
     personal: {
+        firstName: String, // Redundant but helpful for forms
+        middleName: String,
+        lastName: String,
+        fullName: String,
         dob: Date,
         gender: { type: String, enum: ['Male', 'Female', 'Other', 'Prefer not to say'] },
         maritalStatus: { type: String, enum: ['Single', 'Married', 'Divorced', 'Widowed'] },
+        dateOfMarriage: Date,
         bloodGroup: String,
         nationality: String,
         shirtSize: String, // For swag
@@ -65,6 +82,8 @@ const employeeProfileSchema = new mongoose.Schema({
         personalEmail: String,
         mobileNumber: String,
         alternateNumber: String,
+        emergencyNumber: String,
+        landlineNumber: String,
         addresses: [AddressSchema],
         emergencyContact: {
             name: String,
@@ -72,6 +91,20 @@ const employeeProfileSchema = new mongoose.Schema({
             phone: String,
             email: String
         }
+    },
+
+    // --- Family Details (New for HRIS) ---
+    family: {
+        fatherName: String,
+        fatherDob: Date,
+        fatherOccupation: String,
+        motherName: String,
+        motherDob: Date,
+        motherOccupation: String,
+        totalSiblings: Number,
+        spouseName: String,
+        spouseDob: Date,
+        children: [ChildSchema]
     },
 
     // --- Employment Details ---
@@ -101,7 +134,8 @@ const employeeProfileSchema = new mongoose.Schema({
             accountNumber: { type: String, select: false },
             ifscCode: String,
             bankName: String,
-            accountHolderName: String
+            accountHolderName: String,
+            branchAddress: String
         },
         pfAccountNumber: String,
         uanNumber: String
@@ -118,10 +152,30 @@ const employeeProfileSchema = new mongoose.Schema({
         verificationStatus: { type: String, enum: ['Pending', 'Verified', 'Rejected'], default: 'Pending' }
     }],
 
-    // --- History ---
+    // --- History & Skills ---
     education: [EducationSchema],
     experience: [WorkHistorySchema],
-    skills: [String],
+    skills: {
+        technical: [String],
+        behavioral: [String],
+        learningInterests: [String]
+    },
+
+    // --- HRIS Submission ---
+    hris: {
+        isDeclared: { type: Boolean, default: false },
+        declarationDate: Date,
+        submittedAt: Date,
+        lastUpdatedAt: Date,
+        status: {
+            type: String,
+            enum: ['Draft', 'Pending Approval', 'Approved', 'Rejected'],
+            default: 'Draft'
+        },
+        rejectionReason: String,
+        approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        approvalDate: Date
+    },
 
     // --- Metadata ---
     tags: [String],
