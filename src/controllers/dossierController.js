@@ -9,7 +9,9 @@ const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
 const filterProfileFields = (profile, viewer, isSelf) => {
     let profileObj = profile.toObject();
     const permissions = viewer.permissions || [];
-    const isAdmin = viewer.roles.some(r => r.name === 'Admin');
+    // Safe check for roles array
+    const roles = Array.isArray(viewer.roles) ? viewer.roles : [];
+    const isAdmin = roles.some(r => r && r.name === 'Admin');
 
     const canViewSensitive = isAdmin || permissions.includes('dossier.view.sensitive');
 
@@ -118,7 +120,12 @@ exports.getDossier = async (req, res) => {
 
     } catch (error) {
         console.error('Get Dossier Error:', error);
-        res.status(500).json({ message: 'Server Error' });
+        // Return full error in response for easier debugging in Staging/Prod
+        res.status(500).json({
+            message: 'Server Error',
+            error: error.message,
+            stack: process.env.NODE_ENV === 'production' ? '🥞' : error.stack
+        });
     }
 };
 
