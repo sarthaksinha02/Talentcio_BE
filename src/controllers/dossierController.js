@@ -46,10 +46,21 @@ exports.getDossier = async (req, res) => {
             .populate('company', 'name');
 
         if (!profile) {
+            // Safety Check: Ensure Company ID exists
+            const companyId = targetUser.company || req.user.company;
+
+            if (!companyId) {
+                console.error(`[CRITICAL] Cannot create dossier: User ${userId} has no company assigned.`);
+                return res.status(400).json({
+                    message: 'Data Error: User has no company assigned. Please contact support.',
+                    code: 'MISSING_COMPANY'
+                });
+            }
+
             // Create a skeleton profile if it doesn't exist (Lazy Initialization)
             profile = new EmployeeProfile({
                 user: userId,
-                company: targetUser.company, // Use targetUser's company instead of viewer's
+                company: companyId,
                 personal: {
                     firstName: targetUser.firstName,
                     lastName: targetUser.lastName
