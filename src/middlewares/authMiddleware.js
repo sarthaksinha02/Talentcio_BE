@@ -25,6 +25,11 @@ const protect = async (req, res, next) => {
                     }
                 }).populate('reportingManagers', 'firstName lastName');
 
+            // Ensure roles is always an array
+            if (req.user && !req.user.roles) {
+                req.user.roles = [];
+            }
+
             if (!req.user) {
                 return res.status(401).json({ message: 'Not authorized, user not found' });
             }
