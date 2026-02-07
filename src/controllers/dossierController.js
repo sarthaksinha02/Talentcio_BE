@@ -49,7 +49,7 @@ exports.getDossier = async (req, res) => {
             // Create a skeleton profile if it doesn't exist (Lazy Initialization)
             profile = new EmployeeProfile({
                 user: userId,
-                company: req.user.company,
+                company: targetUser.company, // Use targetUser's company instead of viewer's
                 personal: {
                     firstName: targetUser.firstName,
                     lastName: targetUser.lastName
