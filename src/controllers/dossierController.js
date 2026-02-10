@@ -136,15 +136,20 @@ exports.getDossier = async (req, res) => {
         try {
             if (profile.skills && Array.isArray(profile.skills)) {
                 console.warn(`[FIX] Converting skills array to object for user ${userId}`);
-                // Force reset to correct structure
-                profile.skills = {
+                // Force reset to correct structure in DB directly to bypass Mongoose diffing issues
+                const newSkills = {
                     technical: [],
                     behavioral: [],
                     learningInterests: []
                 };
-                // Mark as modified is crucial when changing type significantly
-                profile.markModified('skills');
-                await profile.save();
+
+                await EmployeeProfile.updateOne(
+                    { _id: profile._id },
+                    { $set: { skills: newSkills } }
+                );
+
+                // Update local object so response is correct
+                profile.skills = newSkills;
             }
         } catch (skillError) {
             console.error('[WARNING] Failed to migrate skills array:', skillError.message);
