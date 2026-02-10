@@ -8,10 +8,10 @@ const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
 // But we need granular field filtering here
 const filterProfileFields = (profile, viewer, isSelf) => {
     let profileObj = profile.toObject();
-    const permissions = viewer.permissions || [];
+    const permissions = (viewer && viewer.permissions) ? viewer.permissions : [];
     // Safe check for roles array
-    const roles = Array.isArray(viewer.roles) ? viewer.roles : [];
-    const isAdmin = roles.some(r => r && r.name === 'Admin');
+    const roles = (viewer && Array.isArray(viewer.roles)) ? viewer.roles : [];
+    const isAdmin = roles.some(r => r && (r.name === 'Admin' || r.name === 'Super Admin'));
 
     const canViewSensitive = isAdmin || permissions.includes('dossier.view.sensitive');
 
@@ -132,18 +132,23 @@ exports.getDossier = async (req, res) => {
         // --- Critical Fix for Production ---
         // Verify 'skills' is an object, not an array.
         // MongoDB error "Cannot create field 'behavioral' in element {skills: []}" means it thinks skills is an array.
-        if (profile.skills && Array.isArray(profile.skills)) {
-            console.warn(`[FIX] Converting skills array to object for user ${userId}`);
-            // Force reset to correct structure
-            const oldSkills = profile.skills; // backup if needed
-            profile.skills = {
-                technical: [],
-                behavioral: [],
-                learningInterests: []
-            };
-            // Mark as modified is crucial when changing type significantly
-            profile.markModified('skills');
-            await profile.save();
+        // Verify 'skills' is an object, not an array.
+        try {
+            if (profile.skills && Array.isArray(profile.skills)) {
+                console.warn(`[FIX] Converting skills array to object for user ${userId}`);
+                // Force reset to correct structure
+                profile.skills = {
+                    technical: [],
+                    behavioral: [],
+                    learningInterests: []
+                };
+                // Mark as modified is crucial when changing type significantly
+                profile.markModified('skills');
+                await profile.save();
+            }
+        } catch (skillError) {
+            console.error('[WARNING] Failed to migrate skills array:', skillError.message);
+            // Continue loading dossier, don't crash
         }
         // -----------------------------------
 
@@ -152,11 +157,12 @@ exports.getDossier = async (req, res) => {
 
     } catch (error) {
         console.error('Get Dossier Error:', error);
-        // Return full error in response for easier debugging in Staging/Prod
+        console.error('Req User:', JSON.stringify(req.user, null, 2));
+        console.error('Params:', req.params);
         res.status(500).json({
             message: 'Server Error',
             error: error.message,
-            stack: process.env.NODE_ENV === 'production' ? '🥞' : error.stack
+            // stack: process.env.NODE_ENV === 'production' ? '🥞' : error.stack
         });
     }
 };
