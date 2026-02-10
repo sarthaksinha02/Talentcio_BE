@@ -106,6 +106,31 @@ exports.getDossier = async (req, res) => {
                 .populate('employment.reportingManager', 'firstName lastName')
                 .populate('company', 'name');
         } else {
+
+            // --- Critical Fix for Production (Moved to Top) ---
+            try {
+                if (profile.skills && Array.isArray(profile.skills)) {
+                    console.warn(`[FIX] Converting skills array to object for user ${userId}`);
+                    // Force reset to correct structure in DB directly
+                    const newSkills = {
+                        technical: [],
+                        behavioral: [],
+                        learningInterests: []
+                    };
+
+                    await EmployeeProfile.updateOne(
+                        { _id: profile._id },
+                        { $set: { skills: newSkills } }
+                    );
+
+                    // Update local object and mark as modified to prevent current instance from trying to save the old array
+                    profile.skills = newSkills;
+                }
+            } catch (skillError) {
+                console.error('[WARNING] Failed to migrate skills array:', skillError.message);
+            }
+            // -----------------------------------
+
             // Sync missing data for existing profiles
             let changed = false;
             if (!profile.employment?.department && targetUser.department) {
@@ -129,33 +154,7 @@ exports.getDossier = async (req, res) => {
             }
         }
 
-        // --- Critical Fix for Production ---
-        // Verify 'skills' is an object, not an array.
-        // MongoDB error "Cannot create field 'behavioral' in element {skills: []}" means it thinks skills is an array.
-        // Verify 'skills' is an object, not an array.
-        try {
-            if (profile.skills && Array.isArray(profile.skills)) {
-                console.warn(`[FIX] Converting skills array to object for user ${userId}`);
-                // Force reset to correct structure in DB directly to bypass Mongoose diffing issues
-                const newSkills = {
-                    technical: [],
-                    behavioral: [],
-                    learningInterests: []
-                };
-
-                await EmployeeProfile.updateOne(
-                    { _id: profile._id },
-                    { $set: { skills: newSkills } }
-                );
-
-                // Update local object so response is correct
-                profile.skills = newSkills;
-            }
-        } catch (skillError) {
-            console.error('[WARNING] Failed to migrate skills array:', skillError.message);
-            // Continue loading dossier, don't crash
-        }
-        // -----------------------------------
+        // (Removed duplicate skills fix)
 
         const filteredProfile = filterProfileFields(profile, req.user, isSelf);
         res.status(200).json(filteredProfile);
