@@ -9,7 +9,6 @@ const clientSchema = new mongoose.Schema({
     company: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Company',
-        required: true
     },
     businessUnit: {
         type: mongoose.Schema.Types.ObjectId,

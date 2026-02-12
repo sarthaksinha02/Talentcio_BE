@@ -3,6 +3,7 @@ const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const { cloudinary } = require('../config/cloudinary');
 const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
+const axios = require('axios');
 
 // Helper to check permissions (Simplified for now, ideally strictly middleware)
 // But we need granular field filtering here
@@ -48,6 +49,15 @@ exports.getDossier = async (req, res) => {
         // Verify existence
         const targetUser = await User.findById(userId);
         if (!targetUser) return res.status(404).json({ message: 'User not found' });
+
+        // Permission Check: View Dossier
+        // Users can always view their own. To view others, need 'dossier.view' or Admin.
+        if (!isSelf) {
+            const canView = checkIsAdmin(req.user) || hasPermission(req.user, 'dossier.view');
+            if (!canView) {
+                return res.status(403).json({ message: 'Not authorized to view this dossier' });
+            }
+        }
 
         let profile = await EmployeeProfile.findOne({ user: userId })
             .select('+identity.aadhaarNumber +identity.panNumber +identity.passportNumber +compensation.ctc +compensation.bankDetails.accountNumber +personal.medicalConditions')
@@ -214,10 +224,8 @@ exports.submitHRIS = async (req, res) => {
                 lastUpdatedAt: new Date()
             };
             if (updates.hris.isDeclared) {
-                if (!profile.hris.submittedAt) {
-                    profile.hris.submittedAt = new Date();
-                    profile.hris.declarationDate = new Date();
-                }
+                profile.hris.submittedAt = new Date();
+                profile.hris.declarationDate = new Date();
                 // Set status to Pending Approval when declared
                 profile.hris.status = 'Pending Approval';
             }
@@ -436,10 +444,179 @@ exports.deleteDocument = async (req, res) => {
     }
 };
 
+exports.verifyDocument = async (req, res) => {
+    try {
+        const { userId, docId } = req.params;
+        const { status } = req.body; // 'Verified' or 'Rejected'
+
+        if (!['Verified', 'Rejected'].includes(status)) {
+            return res.status(400).json({ message: 'Invalid status. Must be Verified or Rejected.' });
+        }
+
+        const isAdmin = checkIsAdmin(req.user);
+        const canApprove = isAdmin || hasPermission(req.user, 'dossier.verify_documents') || hasPermission(req.user, 'dossier.approve');
+
+        if (!canApprove) {
+            return res.status(403).json({ message: 'Not authorized to verify documents' });
+        }
+
+        const profile = await EmployeeProfile.findOne({ user: userId });
+        if (!profile) return res.status(404).json({ message: 'Profile not found' });
+
+        const doc = profile.documents.id(docId);
+        if (!doc) return res.status(404).json({ message: 'Document not found' });
+
+        doc.verificationStatus = status;
+
+        // Check overall status to sync documentSubmissionStatus
+        const allVerified = profile.documents.every(d => d.verificationStatus === 'Verified');
+        const anyRejected = profile.documents.some(d => d.verificationStatus === 'Rejected');
+
+        if (allVerified) {
+            profile.documentSubmissionStatus = 'Approved';
+        } else if (anyRejected) {
+            profile.documentSubmissionStatus = 'Changes Requested';
+        }
+        // If still some pending, status remains as is (likely 'Submitted')
+
+        await profile.save();
+
+        await AuditLog.create({
+            action: 'VERIFY_DOCUMENT',
+            module: 'EmployeeDossier',
+            performedBy: req.user._id,
+            company: req.user.company,
+            details: { targetUser: userId, docTitle: doc.title, status, newSubmissionStatus: profile.documentSubmissionStatus },
+            ipAddress: req.ip
+        });
+
+        res.status(200).json({
+            documents: profile.documents,
+            submissionStatus: profile.documentSubmissionStatus
+        });
+
+    } catch (error) {
+        console.error('Verify Document Error:', error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+exports.verifyAllDocuments = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { status } = req.body; // 'Verified' or 'Rejected'
+
+        if (!['Verified', 'Rejected'].includes(status)) {
+            return res.status(400).json({ message: 'Invalid status. Must be Verified or Rejected.' });
+        }
+
+        const isAdmin = checkIsAdmin(req.user);
+        const canApprove = isAdmin || hasPermission(req.user, 'dossier.verify_documents') || hasPermission(req.user, 'dossier.approve');
+
+        if (!canApprove) {
+            return res.status(403).json({ message: 'Not authorized to verify documents' });
+        }
+
+        const profile = await EmployeeProfile.findOne({ user: userId });
+        if (!profile) return res.status(404).json({ message: 'Profile not found' });
+
+        let updatedCount = 0;
+        profile.documents.forEach(doc => {
+            if (doc.verificationStatus === 'Pending') {
+                doc.verificationStatus = status;
+                updatedCount++;
+            }
+        });
+
+        if (updatedCount > 0) {
+
+            // Check overall status
+            const allVerified = profile.documents.every(d => d.verificationStatus === 'Verified');
+            const anyRejected = profile.documents.some(d => d.verificationStatus === 'Rejected');
+
+            if (allVerified) {
+                profile.documentSubmissionStatus = 'Approved';
+            } else if (anyRejected) {
+                profile.documentSubmissionStatus = 'Changes Requested';
+            } else {
+                // Mixed or some pending?
+                // If action was verifyAll, then likely none actally left pending unless filtered
+                // But let's be safe
+                if (profile.documents.some(d => d.verificationStatus === 'Pending')) {
+                    // Status remains Submitted or changes to Changes Requested if something was rejected previously
+                }
+            }
+
+            await profile.save();
+
+            await AuditLog.create({
+                action: 'VERIFY_ALL_DOCUMENTS',
+                module: 'EmployeeDossier',
+                performedBy: req.user._id,
+                company: req.user.company,
+                details: { targetUser: userId, status, count: updatedCount, newSubmissionStatus: profile.documentSubmissionStatus },
+                ipAddress: req.ip
+            });
+        }
+
+        res.status(200).json({
+            message: `Updated ${updatedCount} documents`,
+            documents: profile.documents,
+            submissionStatus: profile.documentSubmissionStatus
+        });
+
+    } catch (error) {
+        console.error('Verify All Documents Error:', error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+exports.submitDocuments = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const viewerId = req.user._id.toString();
+        const isSelf = userId === viewerId; // Only self (or admin acting as self?) usually self.
+
+        if (!isSelf) {
+            return res.status(403).json({ message: 'Can only submit your own documents.' });
+        }
+
+        const profile = await EmployeeProfile.findOne({ user: userId });
+        if (!profile) return res.status(404).json({ message: 'Profile not found' });
+
+        if (!profile.documents || profile.documents.length === 0) {
+            return res.status(400).json({ message: 'No documents to submit.' });
+        }
+
+        profile.documentSubmissionStatus = 'Submitted';
+        // Optionally set all Draft documents to Pending if we had a Draft status for docs, but they are Pending by default on upload.
+
+        await profile.save();
+
+        await AuditLog.create({
+            action: 'SUBMIT_DOCUMENTS',
+            module: 'EmployeeDossier',
+            performedBy: req.user._id,
+            company: req.user.company,
+            details: { targetUser: userId },
+            ipAddress: req.ip
+        });
+
+        res.status(200).json({
+            message: 'Documents submitted successfully',
+            submissionStatus: profile.documentSubmissionStatus
+        });
+
+    } catch (error) {
+        console.error('Submit Documents Error:', error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
 exports.proxyPdf = async (req, res) => {
     try {
-        let { url } = req.query;
-        console.log('Proxying URL:', url);
+        const { url, download } = req.query;
+        console.log('Proxying URL:', url, 'Download:', download);
 
         if (!url || !url.includes('cloudinary')) {
             return res.status(400).json({ message: 'Invalid or missing Cloudinary URL' });
@@ -529,6 +706,7 @@ exports.proxyPdf = async (req, res) => {
                     throw new Error('Empty response body');
                 }
 
+
                 if (res.status < 400) {
                     finalResponse = res;
                     break;
@@ -553,7 +731,7 @@ exports.proxyPdf = async (req, res) => {
         if (contentType) res.setHeader('Content-Type', contentType);
         if (contentLength) res.setHeader('Content-Length', contentLength);
 
-        res.setHeader('Content-Disposition', 'inline');
+        res.setHeader('Content-Disposition', download === 'true' ? 'attachment' : 'inline');
 
         finalResponse.data.pipe(res);
 

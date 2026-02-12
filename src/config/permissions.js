@@ -196,5 +196,15 @@ module.exports = [
         key: "dossier.approve",
         module: "DOSSIER",
         description: "Approve HRIS changes"
+    },
+    {
+        key: "dossier.verify_documents",
+        module: "DOSSIER",
+        description: "Verify and approve employee documents"
+    },
+    {
+        key: "dossier.view",
+        module: "DOSSIER",
+        description: "View other employees' dossiers"
     }
 ];

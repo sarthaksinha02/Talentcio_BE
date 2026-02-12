@@ -143,7 +143,7 @@ const employeeProfileSchema = new mongoose.Schema({
 
     // --- Documents ---
     documents: [{
-        category: { type: String, enum: ['ID Proof', 'Education', 'Offer Letter', 'Payslips', 'Tax', 'Other', 'Employment', 'Resume', 'Appointment Letter'] },
+        category: { type: String, enum: ['ID Proof', 'Education', 'Offer Letter', 'Payslips', 'Tax', 'Other', 'Employment', 'Resume', 'Appointment Letter', 'Relieving Letter', 'Bank'] },
         title: String,
         fileName: String, // Original filename from upload
         url: String,
@@ -151,6 +151,11 @@ const employeeProfileSchema = new mongoose.Schema({
         expiryDate: Date,
         verificationStatus: { type: String, enum: ['Pending', 'Verified', 'Rejected'], default: 'Pending' }
     }],
+    documentSubmissionStatus: {
+        type: String,
+        enum: ['Draft', 'Submitted', 'Approved', 'Changes Requested'],
+        default: 'Draft'
+    },
 
     // --- History & Skills ---
     education: [EducationSchema],
