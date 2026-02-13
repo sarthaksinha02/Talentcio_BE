@@ -976,6 +976,7 @@ exports.exportHRISExcel = async (req, res) => {
                 title: 'Employee Details',
                 columns: [
                     { header: 'Employee Code', key: 'empCode', width: 15 },
+                    { header: 'Full Name', key: 'fullName', width: 25 },
                     { header: 'First Name', key: 'firstName', width: 15 },
                     { header: 'Middle Name', key: 'middleName', width: 15 },
                     { header: 'Last Name', key: 'lastName', width: 15 },
@@ -1172,6 +1173,7 @@ exports.exportHRISExcel = async (req, res) => {
                 const rowData = {
                     // --- STATIC FIELDS (Show only on first row) ---
                     empCode: isFirst ? p.user?.employeeCode : '',
+                    fullName: isFirst ? (p.personal?.fullName || `${p.user?.firstName} ${p.user?.lastName}`.trim()) : '',
                     firstName: isFirst ? p.user?.firstName : '',
                     middleName: '',
                     lastName: isFirst ? p.user?.lastName : '',
