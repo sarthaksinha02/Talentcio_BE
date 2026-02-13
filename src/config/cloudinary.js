@@ -8,14 +8,18 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Test Connection
-cloudinary.api.ping((error, result) => {
-    if (error) {
-        console.error('Cloudinary Connection Failed:', error);
-    } else {
-        console.log('Cloudinary Connection Successful:', result);
-    }
-});
+// Test Connection safely
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+    cloudinary.api.ping((error, result) => {
+        if (error) {
+            console.error('Cloudinary Connection Failed:', error);
+        } else {
+            console.log('Cloudinary Connection Successful:', result);
+        }
+    });
+} else {
+    console.warn('⚠️  Cloudinary environment variables are missing! Uploads will fail.');
+}
 
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
