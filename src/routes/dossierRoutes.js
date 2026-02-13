@@ -16,6 +16,12 @@ router.patch('/:userId/approve-hris', approveHRIS);
 router.patch('/:userId/reject-hris', rejectHRIS);
 
 const uploadMiddleware = (req, res, next) => {
+    if (!process.env.CLOUDINARY_CLOUD_NAME) {
+        return res.status(500).json({
+            message: 'Server Misconfiguration: Missing Cloudinary Credentials',
+            error: 'CLOUDINARY_CLOUD_NAME is not set'
+        });
+    }
     upload.single('file')(req, res, (err) => {
         if (err) {
             console.error('Multer/Cloudinary Middleware Error:', err);
