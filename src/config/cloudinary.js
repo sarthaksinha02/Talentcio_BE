@@ -8,6 +8,15 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
+// Test Connection
+cloudinary.api.ping((error, result) => {
+    if (error) {
+        console.error('Cloudinary Connection Failed:', error);
+    } else {
+        console.log('Cloudinary Connection Successful:', result);
+    }
+});
+
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: async (req, file) => {
