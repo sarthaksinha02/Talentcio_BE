@@ -10,10 +10,12 @@ cloudinary.config({
 
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
-    params: {
-        folder: 'employee_dossier',
-        allowed_formats: ['jpg', 'png', 'jpeg', 'pdf'],
-        resource_type: 'auto' // Important for PDFs
+    params: async (req, file) => {
+        return {
+            folder: 'employee_dossier',
+            resource_type: 'auto',
+            public_id: file.originalname.split('.')[0] + '-' + Date.now(), // Ensure unique filenames
+        };
     },
 });
 

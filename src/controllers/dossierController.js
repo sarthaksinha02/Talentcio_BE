@@ -301,6 +301,12 @@ exports.updateSection = async (req, res) => {
             }
         });
 
+        // Reset HRIS declaration if user is not Admin
+        if (!isAdmin && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
+            profile.hris.isDeclared = false;
+            profile.hris.status = 'Draft';
+        }
+
         await profile.save();
 
         // Audit Log
@@ -338,7 +344,8 @@ exports.addDocument = async (req, res) => {
         }
 
         const isSelf = req.user._id.toString() === userId;
-        const canEdit = isSelf || checkIsAdmin(req.user) || hasPermission(req.user, 'dossier.edit');
+        const isAdmin = checkIsAdmin(req.user);
+        const canEdit = isSelf || isAdmin || hasPermission(req.user, 'dossier.edit');
 
         if (!canEdit) {
             return res.status(403).json({ message: 'Not authorized to upload documents for this user' });
@@ -360,6 +367,12 @@ exports.addDocument = async (req, res) => {
             uploadDate: new Date(),
             verificationStatus: 'Pending'
         });
+
+        // Reset HRIS declaration if user is not Admin
+        if (!isAdmin && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
+            profile.hris.isDeclared = false;
+            profile.hris.status = 'Draft';
+        }
 
         await profile.save();
         console.log('Profile saved');
@@ -388,7 +401,8 @@ exports.deleteDocument = async (req, res) => {
         const { userId, docId } = req.params;
 
         const isSelf = req.user._id.toString() === userId;
-        const canEdit = isSelf || checkIsAdmin(req.user) || hasPermission(req.user, 'dossier.edit');
+        const isAdmin = checkIsAdmin(req.user);
+        const canEdit = isSelf || isAdmin || hasPermission(req.user, 'dossier.edit');
 
         if (!canEdit) {
             return res.status(403).json({ message: 'Not authorized to delete documents for this user' });
@@ -425,6 +439,12 @@ exports.deleteDocument = async (req, res) => {
 
         // Remove document
         profile.documents.pull(docId);
+
+        // Reset HRIS declaration if user is not Admin
+        if (!isAdmin && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
+            profile.hris.isDeclared = false;
+            profile.hris.status = 'Draft';
+        }
         await profile.save();
 
         await AuditLog.create({

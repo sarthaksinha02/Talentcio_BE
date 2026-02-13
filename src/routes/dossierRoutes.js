@@ -15,7 +15,17 @@ router.patch('/:userId/submit-hris', submitHRIS);
 router.patch('/:userId/approve-hris', approveHRIS);
 router.patch('/:userId/reject-hris', rejectHRIS);
 
-router.post('/:userId/documents', upload.single('file'), addDocument);
+const uploadMiddleware = (req, res, next) => {
+    upload.single('file')(req, res, (err) => {
+        if (err) {
+            console.error('Multer/Cloudinary Middleware Error:', err);
+            return res.status(500).json({ message: 'File Upload Error', error: err.message });
+        }
+        next();
+    });
+};
+
+router.post('/:userId/documents', uploadMiddleware, addDocument);
 router.patch('/:userId/documents/:docId/verify', verifyDocument);
 router.patch('/:userId/documents/verify-all', verifyAllDocuments);
 router.patch('/:userId/documents/submit', submitDocuments);
