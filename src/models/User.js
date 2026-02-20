@@ -19,11 +19,6 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Role'
     }],
-    company: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Company',
-        required: true
-    },
     isActive: {
         type: Boolean,
         default: true
@@ -33,6 +28,14 @@ const userSchema = new mongoose.Schema({
         type: String,
         enum: ['Full Time', 'Part Time', 'Contract', 'Intern', 'Consultant', 'Freelance', 'Probation'],
         default: 'Full Time'
+    },
+    profilePicture: {
+        type: String,
+        default: ''
+    },
+    workLocation: {
+        type: String,
+        default: 'Headquarters' // Default value
     },
     employeeCode: String,
     reportingManagers: [{

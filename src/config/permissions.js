@@ -54,6 +54,11 @@ module.exports = [
         module: "TIMESHEET",
         description: "Export timesheet reports"
     },
+    {
+        key: "timesheet.view",
+        module: "TIMESHEET",
+        description: "View timesheet and attendance of all users"
+    },
 
     // ATTENDANCE
     {
@@ -127,6 +132,16 @@ module.exports = [
         key: "project.read",
         module: "PROJECT",
         description: "View projects"
+    },
+    {
+        key: "project.view_assigned",
+        module: "PROJECT",
+        description: "View only assigned projects"
+    },
+    {
+        key: "project.view_team",
+        module: "PROJECT",
+        description: "View projects of direct reports"
     },
     {
         key: "project.hierarchy",

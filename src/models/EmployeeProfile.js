@@ -42,7 +42,6 @@ const ChildSchema = new mongoose.Schema({
 
 const employeeProfileSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
-    company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
 
     // --- Personal Information ---
     personal: {
@@ -101,6 +100,7 @@ const employeeProfileSchema = new mongoose.Schema({
         motherName: String,
         motherDob: Date,
         motherOccupation: String,
+        parentsMaritalStatus: { type: String, enum: ['Single', 'Married', 'Divorced', 'Widowed', 'Separated'] },
         totalSiblings: Number,
         spouseName: String,
         spouseDob: Date,

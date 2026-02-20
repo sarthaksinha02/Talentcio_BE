@@ -7,7 +7,6 @@ exports.getHolidays = async (req, res) => {
     try {
         const year = req.query.year || new Date().getFullYear();
         const holidays = await Holiday.find({
-            company: req.user.company,
             year: year
         }).sort({ date: 1 });
 
@@ -31,7 +30,6 @@ exports.addHoliday = async (req, res) => {
             name,
             date,
             isOptional,
-            company: req.user.company,
             year
         });
 
@@ -54,11 +52,6 @@ exports.updateHoliday = async (req, res) => {
 
         if (!holiday) {
             return res.status(404).json({ msg: 'Holiday not found' });
-        }
-
-        // Authorize (ensure user belongs to same company)
-        if (holiday.company.toString() !== req.user.company.toString()) {
-            return res.status(401).json({ msg: 'User not authorized' });
         }
 
         const taskFields = {};
@@ -91,11 +84,6 @@ exports.deleteHoliday = async (req, res) => {
 
         if (!holiday) {
             return res.status(404).json({ msg: 'Holiday not found' });
-        }
-
-        // Authorize (ensure user belongs to same company)
-        if (holiday.company.toString() !== req.user.company.toString()) {
-            return res.status(401).json({ msg: 'User not authorized' });
         }
 
         await Holiday.findByIdAndDelete(req.params.id);

@@ -11,7 +11,6 @@ app.use(cors());
 app.use(express.json());
 
 // Models (Register Schemas)
-require('./src/models/Company');
 require('./src/models/Permission');
 require('./src/models/Role');
 require('./src/models/User');
@@ -24,6 +23,7 @@ require('./src/models/Timesheet');
 require('./src/models/LeaveConfig');
 require('./src/models/LeaveBalance');
 require('./src/models/LeaveRequest');
+require('./src/models/Candidate');
 
 // Services
 const syncPermissions = require('./src/services/permissionSync');
@@ -38,6 +38,9 @@ const dashboardRoutes = require('./src/routes/dashboardRoutes');
 const holidayRoutes = require('./src/routes/holidayRoutes');
 const leaveRoutes = require('./src/routes/leaveRoutes');
 const dossierRoutes = require('./src/routes/dossierRoutes');
+const talentAcquisitionRoutes = require('./src/routes/talentAcquisitionRoutes');
+const candidateRoutes = require('./src/routes/candidateRoutes');
+const workflowRoutes = require('./src/routes/workflowRoutes');
 
 // Database Connection & Init
 const initServer = async () => {
@@ -56,6 +59,9 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/holidays', holidayRoutes);
 app.use('/api/leaves', leaveRoutes);
 app.use('/api/dossier', dossierRoutes);
+app.use('/api/ta', talentAcquisitionRoutes);
+app.use('/api/ta/candidates', candidateRoutes);
+app.use('/api/workflows', workflowRoutes);
 
 app.get('/', (req, res) => {
     res.json({ message: 'TalentCio API is running' });

@@ -6,11 +6,6 @@ const businessUnitSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
-    company: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Company',
-        required: true
-    },
     headOfUnit: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'

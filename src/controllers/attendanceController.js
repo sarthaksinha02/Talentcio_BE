@@ -139,7 +139,6 @@ const createAttendance = async (req, res) => {
         // Create
         const newAttendance = new Attendance({
             user: targetUserId,
-            company: req.user.company,
             date: attendanceDate,
             status: 'PRESENT',
             clockIn: clockIn ? new Date(clockIn) : null,
@@ -222,7 +221,6 @@ const clockIn = async (req, res) => {
         if (!attendance) {
             attendance = new Attendance({
                 user: req.user._id,
-                company: req.user.company,
                 date: today,
                 status: 'PRESENT'
             });
@@ -284,7 +282,6 @@ const clockOut = async (req, res) => {
             if (hours > 0) {
                 // 2. Find or Create "General Work" Project
                 let generalProject = await Project.findOne({
-                    company: req.user.company,
                     name: 'General Work'
                 });
 
@@ -292,7 +289,6 @@ const clockOut = async (req, res) => {
                     generalProject = await Project.create({
                         name: 'General Work',
                         description: 'Default project for attendance logs',
-                        company: req.user.company,
                         isActive: true
                     });
                 }
@@ -307,7 +303,6 @@ const clockOut = async (req, res) => {
                 if (!timesheet) {
                     timesheet = new Timesheet({
                         user: req.user._id,
-                        company: req.user.company,
                         month: month,
                         entries: []
                     });

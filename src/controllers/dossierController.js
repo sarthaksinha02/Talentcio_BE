@@ -63,29 +63,16 @@ exports.getDossier = async (req, res) => {
             .select('+identity.aadhaarNumber +identity.panNumber +identity.passportNumber +compensation.ctc +compensation.bankDetails.accountNumber +personal.medicalConditions')
             .populate({
                 path: 'user',
-                select: 'firstName lastName email employeeCode roles department joiningDate employmentType',
+                select: 'firstName lastName email employeeCode roles department joiningDate employmentType workLocation',
                 populate: { path: 'roles', select: 'name' }
             })
             .populate('employment.businessUnit', 'name')
-            .populate('employment.reportingManager', 'firstName lastName')
-            .populate('company', 'name');
+            .populate('employment.reportingManager', 'firstName lastName');
 
         if (!profile) {
-            // Safety Check: Ensure Company ID exists
-            const companyId = targetUser.company || req.user.company;
-
-            if (!companyId) {
-                console.error(`[CRITICAL] Cannot create dossier: User ${userId} has no company assigned.`);
-                return res.status(400).json({
-                    message: 'Data Error: User has no company assigned. Please contact support.',
-                    code: 'MISSING_COMPANY'
-                });
-            }
-
             // Create a skeleton profile if it doesn't exist (Lazy Initialization)
             profile = new EmployeeProfile({
                 user: userId,
-                company: companyId,
                 personal: {
                     firstName: targetUser.firstName,
                     lastName: targetUser.lastName
@@ -109,12 +96,11 @@ exports.getDossier = async (req, res) => {
             profile = await EmployeeProfile.findById(profile._id)
                 .populate({
                     path: 'user',
-                    select: 'firstName lastName email employeeCode roles department joiningDate',
+                    select: 'firstName lastName email employeeCode roles department joiningDate employmentType workLocation',
                     populate: { path: 'roles', select: 'name' }
                 })
                 .populate('employment.businessUnit', 'name')
-                .populate('employment.reportingManager', 'firstName lastName')
-                .populate('company', 'name');
+                .populate('employment.reportingManager', 'firstName lastName');
         } else {
 
             // --- Critical Fix for Production (Moved to Top) ---
@@ -237,7 +223,6 @@ exports.submitHRIS = async (req, res) => {
             action: 'SUBMIT_HRIS',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            company: req.user.company,
             details: { targetUser: userId },
             ipAddress: req.ip
         });
@@ -314,7 +299,6 @@ exports.updateSection = async (req, res) => {
             action: 'UPDATE_DOSSIER',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            company: req.user.company,
             details: { targetUser: userId, section, updates: updates },
             ipAddress: req.ip
         });
@@ -382,7 +366,6 @@ exports.addDocument = async (req, res) => {
             action: 'UPLOAD_DOCUMENT',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            company: req.user.company,
             details: { targetUser: userId, docTitle: title },
             ipAddress: req.ip
         });
@@ -451,7 +434,6 @@ exports.deleteDocument = async (req, res) => {
             action: 'DELETE_DOCUMENT',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            company: req.user.company,
             details: { targetUser: userId, docTitle: docTitle },
             ipAddress: req.ip
         });
@@ -505,7 +487,6 @@ exports.verifyDocument = async (req, res) => {
             action: 'VERIFY_DOCUMENT',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            company: req.user.company,
             details: { targetUser: userId, docTitle: doc.title, status, newSubmissionStatus: profile.documentSubmissionStatus },
             ipAddress: req.ip
         });
@@ -573,7 +554,6 @@ exports.verifyAllDocuments = async (req, res) => {
                 action: 'VERIFY_ALL_DOCUMENTS',
                 module: 'EmployeeDossier',
                 performedBy: req.user._id,
-                company: req.user.company,
                 details: { targetUser: userId, status, count: updatedCount, newSubmissionStatus: profile.documentSubmissionStatus },
                 ipAddress: req.ip
             });
@@ -617,7 +597,6 @@ exports.submitDocuments = async (req, res) => {
             action: 'SUBMIT_DOCUMENTS',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            company: req.user.company,
             details: { targetUser: userId },
             ipAddress: req.ip
         });
@@ -897,7 +876,6 @@ exports.approveHRIS = async (req, res) => {
             action: 'APPROVE_HRIS',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            company: req.user.company,
             details: { targetUser: userId },
             ipAddress: req.ip
         });
@@ -939,7 +917,6 @@ exports.rejectHRIS = async (req, res) => {
             action: 'REJECT_HRIS',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            company: req.user.company,
             details: { targetUser: userId, reason },
             ipAddress: req.ip
         });
@@ -957,7 +934,7 @@ exports.exportHRISExcel = async (req, res) => {
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('HRIS Data');
 
-        const query = { company: req.user.company };
+        const query = {};
         if (req.query.userId) {
             query.user = req.query.userId;
         }
@@ -976,6 +953,7 @@ exports.exportHRISExcel = async (req, res) => {
                 title: 'Employee Details',
                 columns: [
                     { header: 'Employee Code', key: 'empCode', width: 15 },
+                    { header: 'Full Name', key: 'fullName', width: 25 },
                     { header: 'First Name', key: 'firstName', width: 15 },
                     { header: 'Middle Name', key: 'middleName', width: 15 },
                     { header: 'Last Name', key: 'lastName', width: 15 },
@@ -1172,6 +1150,7 @@ exports.exportHRISExcel = async (req, res) => {
                 const rowData = {
                     // --- STATIC FIELDS (Show only on first row) ---
                     empCode: isFirst ? p.user?.employeeCode : '',
+                    fullName: isFirst ? (p.personal?.fullName || `${p.user?.firstName} ${p.user?.lastName}`.trim()) : '',
                     firstName: isFirst ? p.user?.firstName : '',
                     middleName: '',
                     lastName: isFirst ? p.user?.lastName : '',

@@ -6,11 +6,6 @@ const attendanceSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
-    company: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Company',
-        required: true
-    },
     date: {
         type: Date,
         required: true
@@ -34,14 +29,14 @@ const attendanceSchema = new mongoose.Schema({
         lng: Number
     },
     notes: String,
-    approvalStatus: { 
-        type: String, 
-        enum: ['PENDING', 'APPROVED', 'REJECTED'], 
-        default: 'PENDING' 
+    approvalStatus: {
+        type: String,
+        enum: ['PENDING', 'APPROVED', 'REJECTED'],
+        default: 'PENDING'
     },
-    approvedBy: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'User' 
+    approvedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
     },
     rejectionReason: String
 }, { timestamps: true });

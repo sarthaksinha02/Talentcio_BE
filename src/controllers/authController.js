@@ -1,5 +1,4 @@
 const User = require('../models/User');
-const Company = require('../models/Company');
 const jwt = require('jsonwebtoken');
 
 // Generate JWT Helper
@@ -9,11 +8,11 @@ const generateToken = (id, tokenVersion) => {
     });
 };
 
-// @desc    Register a new company and admin user
-// @route   POST /api/auth/register-company
+// @desc    Register a new user
+// @route   POST /api/auth/register
 // @access  Public
-const registerCompany = async (req, res) => {
-    const { companyName, email, password, firstName, lastName } = req.body;
+const register = async (req, res) => {
+    const { email, password, firstName, lastName } = req.body;
 
     try {
         const userExists = await User.findOne({ email });
@@ -21,23 +20,11 @@ const registerCompany = async (req, res) => {
             return res.status(400).json({ message: 'User already exists' });
         }
 
-        // 1. Create Company
-        const company = await Company.create({
-            name: companyName
-        });
-
-        // 2. Create User (Super Admin for this company)
-        // Note: In real app, we should assign a Super Admin Role here.
-        // For now, we will create the user and let the seed/bootstrap handle role assignment
-        // or hardcode 'isSystem' check if we added that to User (we added it to Role).
-        // Let's assume we simply create the user for now.
-
         const user = await User.create({
             firstName,
             lastName,
             email,
-            password,
-            company: company._id
+            password
         });
 
         if (user) {
@@ -45,8 +32,6 @@ const registerCompany = async (req, res) => {
                 _id: user._id,
                 firstName: user.firstName,
                 email: user.email,
-                company: company.name,
-                company: company.name,
                 token: generateToken(user._id, user.tokenVersion)
             });
         } else {
@@ -97,11 +82,9 @@ const loginUser = async (req, res) => {
                 lastName: user.lastName,
                 email: user.email,
                 joiningDate: user.joiningDate,
-                company: user.company,
                 reportingManagers: user.reportingManagers,
                 roles: user.roles.map(r => r.name),
                 permissions: permissions,
-                directReportsCount: directReportsCount,
                 directReportsCount: directReportsCount,
                 token: generateToken(user._id, user.tokenVersion)
             });
@@ -114,7 +97,36 @@ const loginUser = async (req, res) => {
     }
 };
 
+// @desc    Upload Profile Picture
+// @route   POST /api/auth/upload-profile-picture
+// @access  Private
+const uploadProfilePicture = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No file uploaded' });
+        }
+
+        const user = await User.findById(req.user._id);
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        user.profilePicture = req.file.path;
+        await user.save();
+
+        res.json({
+            message: 'Profile picture uploaded successfully',
+            profilePicture: user.profilePicture
+        });
+    } catch (error) {
+        console.error('UPLOAD ERROR:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
 module.exports = {
-    registerCompany,
-    loginUser
+    register,
+    loginUser,
+    uploadProfilePicture
 };

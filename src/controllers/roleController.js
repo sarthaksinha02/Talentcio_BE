@@ -7,13 +7,7 @@ const User = require('../models/User');
 // @access  Private
 const getRoles = async (req, res) => {
     try {
-        // Fetch roles belonging to company OR system roles
-        const roles = await Role.find({
-            $or: [
-                { company: req.user.company },
-                { isSystem: true }
-            ]
-        }).populate('permissions');
+        const roles = await Role.find({}).populate('permissions');
         res.json(roles);
     } catch (error) {
         console.error(error);
@@ -30,7 +24,6 @@ const createRole = async (req, res) => {
     try {
         const role = await Role.create({
             name,
-            company: req.user.company,
             permissions,
             isSystem: false
         });
@@ -46,7 +39,7 @@ const createRole = async (req, res) => {
 // @access  Private (Admin)
 const updateRole = async (req, res) => {
     try {
-        const role = await Role.findOne({ _id: req.params.id, company: req.user.company });
+        const role = await Role.findById(req.params.id);
 
         if (!role) {
             return res.status(404).json({ message: 'Role not found' });

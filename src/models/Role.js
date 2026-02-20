@@ -9,10 +9,6 @@ const roleSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Permission'
     }],
-    company: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Company'
-    },
     isSystem: {
         type: Boolean,
         default: false
@@ -23,7 +19,7 @@ const roleSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// Ensure role names are unique per company
-roleSchema.index({ name: 1, company: 1 }, { unique: true });
+// Ensure role names are unique
+roleSchema.index({ name: 1 }, { unique: true });
 
 module.exports = mongoose.model('Role', roleSchema);

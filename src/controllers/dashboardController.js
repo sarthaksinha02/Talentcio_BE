@@ -7,7 +7,6 @@ const Project = require('../models/Project');
 // @access  Private
 const getDashboardStats = async (req, res) => {
     try {
-        const companyId = req.user.company;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
@@ -15,13 +14,11 @@ const getDashboardStats = async (req, res) => {
 
         // 1. Total Employees
         const totalEmployees = await User.countDocuments({
-            company: companyId,
             isActive: true
         });
 
         // 2. Attendance Stats for Today
         const presentToday = await Attendance.countDocuments({
-            company: companyId,
             date: { $gte: today, $lt: tomorrow },
             status: { $in: ['PRESENT', 'HALF_DAY'] }
         });
@@ -33,18 +30,15 @@ const getDashboardStats = async (req, res) => {
         // 3. Pending Approvals (Leaves/Attendance)
         // Assuming we look for 'PENDING' status in Attendance (which handles requests)
         const pendingRequests = await Attendance.countDocuments({
-            company: companyId,
             approvalStatus: 'PENDING'
         });
 
         // 4. Daily Attendance List (All Employees)
         const allUsers = await User.find({
-            company: companyId,
             isActive: true
         }).select('firstName lastName employeeCode department');
 
         const todaysAttendance = await Attendance.find({
-            company: companyId,
             date: { $gte: today, $lt: tomorrow }
         });
 
@@ -72,9 +66,7 @@ const getDashboardStats = async (req, res) => {
         });
 
         // 5. All Projects
-        const allProjects = await Project.find({
-            company: companyId
-        })
+        const allProjects = await Project.find({})
             .sort({ updatedAt: -1 })
             .limit(10)
             .select('name isActive dueDate'); // status is not in schema, using isActive

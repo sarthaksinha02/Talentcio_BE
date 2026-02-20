@@ -9,7 +9,7 @@ const User = require('../models/User');
 // --- Employees (Helper for Dropdowns) ---
 const getEmployees = async (req, res) => {
     try {
-        const users = await User.find({ company: req.user.company })
+        const users = await User.find({})
             .select('firstName lastName email');
         res.json(users);
     } catch (error) {
@@ -20,7 +20,7 @@ const getEmployees = async (req, res) => {
 // --- Business Units ---
 const getBusinessUnits = async (req, res) => {
     try {
-        const units = await BusinessUnit.find({ company: req.user.company })
+        const units = await BusinessUnit.find({})
             .populate('headOfUnit', 'firstName lastName');
         res.json(units);
     } catch (error) {
@@ -30,7 +30,7 @@ const getBusinessUnits = async (req, res) => {
 
 const createBusinessUnit = async (req, res) => {
     try {
-        const unit = await BusinessUnit.create({ ...req.body, company: req.user.company });
+        const unit = await BusinessUnit.create({ ...req.body });
         res.status(201).json(unit);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -40,7 +40,7 @@ const createBusinessUnit = async (req, res) => {
 const updateBusinessUnit = async (req, res) => {
     try {
         const unit = await BusinessUnit.findOneAndUpdate(
-            { _id: req.params.id, company: req.user.company },
+            { _id: req.params.id },
             req.body,
             { new: true }
         );
@@ -54,7 +54,7 @@ const updateBusinessUnit = async (req, res) => {
 // --- Clients ---
 const getClients = async (req, res) => {
     try {
-        const clients = await Client.find({ company: req.user.company })
+        const clients = await Client.find({})
             .populate('businessUnit', 'name');
         res.json(clients);
     } catch (error) {
@@ -64,7 +64,7 @@ const getClients = async (req, res) => {
 
 const createClient = async (req, res) => {
     try {
-        const client = await Client.create({ ...req.body, company: req.user.company });
+        const client = await Client.create({ ...req.body });
         res.status(201).json(client);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -74,7 +74,7 @@ const createClient = async (req, res) => {
 const updateClient = async (req, res) => {
     try {
         const client = await Client.findOneAndUpdate(
-            { _id: req.params.id, company: req.user.company },
+            { _id: req.params.id },
             req.body,
             { new: true }
         );
@@ -91,26 +91,49 @@ const getProjects = async (req, res) => {
         // If user is basic employee, maybe we want to filter? 
         // For now, adhering to 'project.read' permission check in route.
         // If Admin, fetch all. If not, fetch only assigned projects (manager, member, or has assigned task)
-        let query = { company: req.user.company };
+        let query = {};
 
         // Check if user is Admin
         // Check if user is Admin or has global read permission
         const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
             req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
 
-        if (!canViewAll) {
-            // 1. Find Tasks assigned to user to get relevant Module IDs
-            // We need to find purely unique modules first to save lookup time
-            const assignedModuleIds = await Task.distinct('module', { assignees: req.user._id });
+        const canViewAssigned = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_assigned'));
+        const canViewTeam = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_team'));
 
-            // 2. Find Projects associated with those modules
+        if (canViewAll) {
+            // Fetch all projects
+        } else if (canViewAssigned || canViewTeam) {
+            const orConditions = [];
+
+            // 1. Assigned Projects (Manager, Member, or Task Assigned)
+            const assignedModuleIds = await Task.distinct('module', { assignees: req.user._id });
             const taskProjectIds = await Module.distinct('project', { _id: { $in: assignedModuleIds } });
 
-            query.$or = [
-                { manager: req.user._id },
-                { members: req.user._id },
-                { _id: { $in: taskProjectIds } }
-            ];
+            orConditions.push({ manager: req.user._id });
+            orConditions.push({ members: req.user._id });
+            orConditions.push({ _id: { $in: taskProjectIds } });
+
+            // 2. Team Projects
+            if (canViewTeam) {
+                const directReports = await User.find({ reportingManagers: req.user._id }).select('_id');
+                const reportIds = directReports.map(u => u._id);
+
+                if (reportIds.length > 0) {
+                    orConditions.push({ manager: { $in: reportIds } });
+                    orConditions.push({ members: { $in: reportIds } });
+
+                    const teamAssignedModuleIds = await Task.distinct('module', { assignees: { $in: reportIds } });
+                    const teamTaskProjectIds = await Module.distinct('project', { _id: { $in: teamAssignedModuleIds } });
+                    orConditions.push({ _id: { $in: teamTaskProjectIds } });
+                }
+            }
+
+            query.$or = orConditions;
+        } else {
+            // Neither Admin, nor Read All, nor View Assigned -> See Nothing
+            // Setting a query that returns nothing
+            query._id = null;
         }
 
         const projects = await Project.find(query)
@@ -126,7 +149,7 @@ const getProjects = async (req, res) => {
 const getProjectHierarchy = async (req, res) => {
     try {
         const { id } = req.params;
-        const project = await Project.findOne({ _id: id, company: req.user.company })
+        const project = await Project.findById(id)
             .populate('client', 'name')
             .populate('manager', 'firstName lastName')
             .populate('members', '_id'); // Need IDs to check membership
@@ -137,25 +160,62 @@ const getProjectHierarchy = async (req, res) => {
         const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
             req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
 
+        const canViewAssigned = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_assigned'));
+        const canViewTeam = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_team'));
+
+        // Strict Check
+        if (!canViewAll && !canViewAssigned && !canViewTeam) {
+            return res.status(403).json({ message: 'Not authorized to view projects' });
+        }
+
         const isManager = project.manager?._id.toString() === req.user._id.toString();
         const isMember = project.members.some(m => m._id.toString() === req.user._id.toString());
 
-        // Check for assigned tasks if not already authorized
-        let hasAssignedTask = false;
-        if (!canViewAll && !isManager && !isMember) {
-            // Find tasks in this project assigned to user
+        // Determine Access
+        let hasAccess = canViewAll || isManager || isMember;
+
+        if (!hasAccess) {
             const projectModules = await Module.find({ project: id }).select('_id');
             const projectModuleIds = projectModules.map(m => m._id);
-            const assignedTask = await Task.findOne({
-                module: { $in: projectModuleIds },
-                assignees: req.user._id
-            });
-            if (assignedTask) hasAssignedTask = true;
+
+            // 1. Check Assigned Task
+            if (canViewAssigned || canViewTeam) {
+                const assignedTask = await Task.findOne({
+                    module: { $in: projectModuleIds },
+                    assignees: req.user._id
+                });
+                if (assignedTask) hasAccess = true;
+            }
+
+            // 2. Check Team Access
+            if (!hasAccess && canViewTeam) {
+                const directReports = await User.find({ reportingManagers: req.user._id }).select('_id');
+                const reportIds = directReports.map(u => u._id.toString());
+
+                if (reportIds.length > 0) {
+                    // Check if report is manager or member
+                    const reportIsManager = project.manager && reportIds.includes(project.manager._id.toString());
+                    const reportIsMember = project.members.some(m => reportIds.includes(m._id.toString()));
+
+                    if (reportIsManager || reportIsMember) {
+                        hasAccess = true;
+                    } else {
+                        // Check if report has task
+                        const teamTask = await Task.findOne({
+                            module: { $in: projectModuleIds },
+                            assignees: { $in: reportIds }
+                        });
+                        if (teamTask) hasAccess = true;
+                    }
+                }
+            }
         }
 
-        if (!canViewAll && !isManager && !isMember && !hasAssignedTask) {
+        if (!hasAccess) {
             return res.status(403).json({ message: 'Not authorized to view this project' });
         }
+
+
 
         const modules = await Module.find({ project: id }).sort({ startDate: 1 });
 
@@ -231,7 +291,7 @@ const getProjectHierarchy = async (req, res) => {
 
 const createProject = async (req, res) => {
     try {
-        const project = await Project.create({ ...req.body, company: req.user.company });
+        const project = await Project.create({ ...req.body });
         res.status(201).json(project);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -241,7 +301,7 @@ const createProject = async (req, res) => {
 const updateProject = async (req, res) => {
     try {
         const project = await Project.findOneAndUpdate(
-            { _id: req.params.id, company: req.user.company },
+            { _id: req.params.id },
             req.body,
             { new: true }
         );
@@ -254,7 +314,7 @@ const updateProject = async (req, res) => {
 
 const deleteProject = async (req, res) => {
     try {
-        const project = await Project.findOneAndDelete({ _id: req.params.id, company: req.user.company });
+        const project = await Project.findOneAndDelete({ _id: req.params.id });
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
         // Cascade Delete
@@ -291,24 +351,50 @@ const getModules = async (req, res) => {
         const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
             req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
 
+        const canViewAssigned = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_assigned'));
+        const canViewTeam = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_team'));
+
+        // Strict Check: If not Admin/Read, MUST have view_assigned or view_team
+        if (!canViewAll && !canViewAssigned && !canViewTeam) {
+            return res.status(403).json({ message: 'Not authorized to view modules for this project' });
+        }
+
         const isManager = project.manager?.toString() === req.user._id.toString();
         const isMember = project.members?.some(m => m.toString() === req.user._id.toString());
 
         let hasAccess = canViewAll || isManager || isMember;
 
         if (!hasAccess) {
-            // Check if user has ANY task in this project (via modules)
-            // 1. Get all modules for this project
             const modules = await Module.find({ project: projectId }).select('_id');
             const moduleIds = modules.map(m => m._id);
 
-            // 2. Check for assigned task in these modules
-            const assignedTask = await Task.findOne({
-                module: { $in: moduleIds },
-                assignees: req.user._id
-            });
+            // 1. Check Assigned Task
+            if (canViewAssigned || canViewTeam) {
+                const assignedTask = await Task.findOne({
+                    module: { $in: moduleIds },
+                    assignees: req.user._id
+                });
+                if (assignedTask) hasAccess = true;
+            }
 
-            if (assignedTask) hasAccess = true;
+            // 2. Check Team Access
+            if (!hasAccess && canViewTeam) {
+                const directReports = await User.find({ reportingManagers: req.user._id }).select('_id');
+                const reportIds = directReports.map(u => u._id.toString());
+                if (reportIds.length > 0) {
+                    const reportIsManager = project.manager && reportIds.includes(project.manager.toString());
+                    const reportIsMember = project.members && project.members.some(m => reportIds.includes(m.toString()));
+                    if (reportIsManager || reportIsMember) {
+                        hasAccess = true;
+                    } else {
+                        const teamTask = await Task.findOne({
+                            module: { $in: moduleIds },
+                            assignees: { $in: reportIds }
+                        });
+                        if (teamTask) hasAccess = true;
+                    }
+                }
+            }
         }
 
         if (!hasAccess) {

@@ -25,7 +25,6 @@ const getCurrentTimesheet = async (req, res) => {
             // Create a draft if it doesn't exist
             timesheet = await Timesheet.create({
                 user: req.user._id,
-                company: req.user.company,
                 month: currentMonth,
                 status: 'DRAFT',
                 rejectionReason: ''
@@ -232,7 +231,7 @@ const submitTimesheet = async (req, res) => {
 // @access  Private
 const getProjects = async (req, res) => {
     try {
-        const projects = await Project.find({ company: req.user.company, isActive: true });
+        const projects = await Project.find({ isActive: true });
         res.json(projects);
     } catch (error) {
         console.error(error);
@@ -246,8 +245,7 @@ const getProjects = async (req, res) => {
 const createProject = async (req, res) => {
     try {
         const project = await Project.create({
-            ...req.body,
-            company: req.user.company
+            ...req.body
         });
         res.json(project);
     } catch (error) {
@@ -278,7 +276,7 @@ const getUserTimesheet = async (req, res) => {
         const hasRole = (name) => req.user.roles && req.user.roles.some(r => r.name === name);
         const hasPermission = (key) => req.user.roles && req.user.roles.some(r => r.permissions && r.permissions.some(p => p.key === key));
 
-        const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve') || hasPermission('attendance.view');
+        const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve') || hasPermission('attendance.view') || hasPermission('timesheet.view');
 
         if (!isManager && !isAdmin) {
             return res.status(403).json({ message: 'Not authorized to view this timesheet' });
