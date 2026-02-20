@@ -12,10 +12,10 @@ const leaveConfigSchema = new mongoose.Schema({
         required: true
     },
     description: String,
-    employeeTypes: [{
-        type: String, // 'Full Time', 'Consultant', 'All'
-        default: 'All'
-    }],
+    employeeTypes: {
+        type: [String],
+        default: []
+    },
     isPaid: {
         type: Boolean,
         default: true

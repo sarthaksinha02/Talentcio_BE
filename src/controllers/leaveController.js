@@ -105,7 +105,12 @@ const getMyBalances = async (req, res) => {
         const year = new Date().getFullYear();
 
         // Start by getting all active policies
-        const policies = await LeaveConfig.find({ isActive: true });
+        const allPolicies = await LeaveConfig.find({ isActive: true });
+
+        // Filter policies based on user employment type (Strict Check)
+        const userEmploymentType = req.user.employmentType || 'Full Time';
+        const policies = allPolicies.filter(p => p.employeeTypes && p.employeeTypes.includes(userEmploymentType));
+
         const balances = [];
 
         for (const policy of policies) {

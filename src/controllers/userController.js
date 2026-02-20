@@ -6,8 +6,8 @@ const Role = require('../models/Role');
 // @access  Private (Admin)
 const getUsers = async (req, res) => {
     try {
-        const users = await User.find({ company: req.user.company })
-            .select('-password')
+        const users = await User.find({})
+            .select('-password -company')
             .populate('roles', 'name')
             .populate('reportingManagers', 'firstName lastName email')
             .populate('employeeProfile', 'hris');
@@ -22,7 +22,7 @@ const getUsers = async (req, res) => {
 // @route   POST /api/users
 // @access  Private (Admin)
 const createUser = async (req, res) => {
-    const { firstName, lastName, email, password, roleId, department, employmentType, employeeCode, joiningDate, directReports, reportingManagers } = req.body;
+    const { firstName, lastName, email, password, roleId, department, workLocation, employmentType, employeeCode, joiningDate, directReports, reportingManagers } = req.body;
     console.log('Create User Body:', req.body); // DEBUG LOG
 
     try {
@@ -34,7 +34,7 @@ const createUser = async (req, res) => {
 
         // Validate Role
         const role = await Role.findById(roleId);
-        if (!role || role.company.toString() !== req.user.company.toString()) {
+        if (!role) {
             return res.status(400).json({ message: 'Invalid Role' });
         }
 
@@ -43,9 +43,9 @@ const createUser = async (req, res) => {
             lastName,
             email,
             password,
-            company: req.user.company,
             roles: [roleId],
             department,
+            workLocation,
             employmentType,
             employeeCode,
             joiningDate,
@@ -84,7 +84,7 @@ const updateUserRole = async (req, res) => {
     try {
         const user = await User.findById(req.params.id);
 
-        if (!user || user.company.toString() !== req.user.company.toString()) {
+        if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
@@ -103,12 +103,12 @@ const updateUserRole = async (req, res) => {
 // @route   PUT /api/users/:id
 // @access  Private (Admin)
 const updateUser = async (req, res) => {
-    const { firstName, lastName, email, password, roleId, department, employmentType, employeeCode, joiningDate, directReports } = req.body;
+    const { firstName, lastName, email, password, roleId, department, workLocation, employmentType, employeeCode, joiningDate, directReports } = req.body;
     console.log('Update User Body:', req.body); // DEBUG LOG
     try {
         const user = await User.findById(req.params.id);
 
-        if (!user || user.company.toString() !== req.user.company.toString()) {
+        if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
@@ -117,6 +117,7 @@ const updateUser = async (req, res) => {
         user.email = email || user.email;
         if (password) user.password = password;
         user.department = department || user.department;
+        user.workLocation = workLocation || user.workLocation;
         user.employmentType = employmentType || user.employmentType;
         user.employeeCode = employeeCode || user.employeeCode;
         if (joiningDate) user.joiningDate = joiningDate;
@@ -126,7 +127,7 @@ const updateUser = async (req, res) => {
             const currentRoleId = user.roles && user.roles.length > 0 ? user.roles[0].toString() : null;
             if (currentRoleId !== roleId) {
                 const role = await Role.findById(roleId);
-                if (role && (role.company.toString() === req.user.company.toString() || role.isSystem)) {
+                if (role) {
                     user.roles = [roleId];
                     user.tokenVersion = (user.tokenVersion || 0) + 1;
                 }
@@ -135,7 +136,6 @@ const updateUser = async (req, res) => {
 
         await user.save();
 
-        // Handle Direct Reports (Assign subordinates)
         // Handle Direct Reports (Assign subordinates)
         if (directReports && Array.isArray(directReports)) {
             // 1. Remove this user from reportingManagers of users who are NO LONGER direct reports
@@ -175,15 +175,29 @@ const getMyTeam = async (req, res) => {
 const getMyself = async (req, res) => {
     try {
         const user = await User.findById(req.user._id)
-            .select('-password')
-            .populate('roles', 'name')
+            .select('-password -company')
+            .populate({
+                path: 'roles',
+                populate: { path: 'permissions' }
+            })
             .populate('reportingManagers', 'firstName lastName email');
+
+        // Flatten unique permission keys (same logic as loginUser)
+        let permissions = [...new Set(
+            user.roles.flatMap(role => (role.permissions || []).map(p => p.key))
+        )];
 
         // Also fetch subordinates
         const subordinates = await User.find({ reportingManagers: req.user._id })
             .select('firstName lastName email role department');
 
-        res.json({ ...user.toObject(), directReports: subordinates });
+        res.json({
+            ...user.toObject(),
+            roles: user.roles,                   // Full objects so Profile.jsx can read r.name
+            roleNames: user.roles.map(r => r.name), // Flat names array for AuthContext
+            permissions,
+            directReports: subordinates
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error' });
@@ -193,7 +207,7 @@ const getMyself = async (req, res) => {
 const getUserById = async (req, res) => {
     try {
         const user = await User.findById(req.params.id)
-            .select('-password')
+            .select('-password -company')
             .populate('roles', 'name')
             .populate('reportingManagers', 'firstName lastName email');
         if (!user) {

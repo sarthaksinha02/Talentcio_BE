@@ -20,14 +20,14 @@ const projectSchema = new mongoose.Schema({
     }],
 
     description: String,
-    company: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Company',
-        required: true
-    },
     isActive: {
         type: Boolean,
         default: true
+    },
+    status: {
+        type: String,
+        enum: ['Active', 'On Hold', 'Completed'],
+        default: 'Active'
     },
     startDate: Date,
     dueDate: Date

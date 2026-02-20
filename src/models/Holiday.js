@@ -14,18 +14,13 @@ const holidaySchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    company: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Company',
-        required: true
-    },
     year: {
         type: Number,
         required: true
     }
 }, { timestamps: true });
 
-// Ensure unique holiday name per year per company (optional but good practice)
-holidaySchema.index({ company: 1, name: 1, year: 1 }, { unique: true });
+// Ensure unique holiday name per year
+holidaySchema.index({ name: 1, year: 1 }, { unique: true });
 
 module.exports = mongoose.model('Holiday', holidaySchema);

@@ -21,11 +21,18 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
     console.warn('⚠️  Cloudinary environment variables are missing! Uploads will fail.');
 }
 
+// Storage for all document uploads (employee dossier, resumes, etc.)
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: async (req, file) => {
+        let folderName = 'employee_dossier'; // Default folder
+
+        if (file.fieldname === 'resume') {
+            folderName = 'resumes';
+        }
+
         return {
-            folder: 'employee_dossier',
+            folder: folderName,
             resource_type: 'auto',
             public_id: file.originalname.split('.')[0] + '-' + Date.now(), // Ensure unique filenames
         };

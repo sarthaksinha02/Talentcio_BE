@@ -23,11 +23,11 @@ const logWork = async (req, res) => {
         endOfDay.setHours(23, 59, 59, 999);
 
         const existingLog = await WorkLog.findOne({
-             task: taskId,
-             user: req.user._id,
-             date: { $gte: startOfDay, $lte: endOfDay }
+            task: taskId,
+            user: req.user._id,
+            date: { $gte: startOfDay, $lte: endOfDay }
         });
-    
+
         if (existingLog) {
             return res.status(400).json({ message: 'You have already logged work for this task today. Please edit the existing entry.' });
         }
@@ -44,11 +44,10 @@ const logWork = async (req, res) => {
         // Ensure a Timesheet exists for this month, but don't duplicate data
         const month = new Date(date).toISOString().slice(0, 7); // YYYY-MM
         let timesheet = await Timesheet.findOne({ user: req.user._id, month });
-        
+
         if (!timesheet) {
             await Timesheet.create({
                 user: req.user._id,
-                company: req.user.company,
                 month,
                 status: 'DRAFT'
             });
@@ -74,7 +73,7 @@ const updateWorkLog = async (req, res) => {
         const timesheet = await Timesheet.findOne({ user: req.user._id, month });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-             return res.status(400).json({ message: 'Cannot edit logs for a submitted timesheet' });
+            return res.status(400).json({ message: 'Cannot edit logs for a submitted timesheet' });
         }
 
         // Update WorkLog
@@ -101,9 +100,9 @@ const deleteWorkLog = async (req, res) => {
         const timesheet = await Timesheet.findOne({ user: req.user._id, month });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-             return res.status(400).json({ message: 'Cannot delete logs for a submitted timesheet' });
+            return res.status(400).json({ message: 'Cannot delete logs for a submitted timesheet' });
         }
-        
+
         await WorkLog.deleteOne({ _id: req.params.id });
 
         res.json({ message: 'Work log deleted' });
