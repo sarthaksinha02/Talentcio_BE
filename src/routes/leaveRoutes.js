@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect, admin } = require('../middlewares/authMiddleware');
 const { getLeavePolicies, updateLeavePolicy, deleteLeavePolicy, seedDefaultPolicies, triggerMonthlyAccrual, triggerYearlyAccrual } = require('../controllers/leaveConfigController');
-const { applyLeave, getMyLeaves, getMyBalances, getManagerApprovals, updateLeaveStatus } = require('../controllers/leaveController');
+const { applyLeave, getMyLeaves, getMyBalances, getManagerApprovals, updateLeaveStatus, cancelLeave } = require('../controllers/leaveController');
 
 // Configuration Routes
 router.route('/config')
@@ -25,5 +25,8 @@ router.get('/balance', protect, getMyBalances);
 // Manager Operation Routes
 router.get('/approvals', protect, getManagerApprovals);
 router.put('/approve/:id', protect, updateLeaveStatus);
+
+// Employee Cancellation Route
+router.put('/cancel/:id', protect, cancelLeave);
 
 module.exports = router;

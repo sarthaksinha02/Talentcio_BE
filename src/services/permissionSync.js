@@ -24,33 +24,25 @@ const syncPermissions = async () => {
             allPermissionIds.push(savedPerm._id);
         }
 
-        // 3. Mark permissions not in config as deprecated
-        await Permission.updateMany(
-            { key: { $nin: configKeys } },
-            { $set: { isDeprecated: true } }
-        );
+        // 3. We will NOT mark permissions not in config as deprecated, 
+        // to preserve any custom permissions added via UI, Compass, or other scripts.
 
-        // 4. Auto-assign all permissions to Admin role
+        // 4. Auto-assign ALL permissions in the database to the Admin role
+        const allPermsInDb = await Permission.find({}).select('_id');
+        const allDbPermissionIds = allPermsInDb.map(p => p._id);
+
         const Role = require('../models/Role');
-        const adminRole = await Role.findOne({ name: 'Admin' });
+        const adminRole = await Role.findOne({ $or: [{ name: 'Admin' }, { isSystem: true }] });
 
         if (adminRole) {
-            // Using addToSet to ensure we don't have duplicates if merging, 
-            // but for 'Admin' usually we want them to have EVERYTHING active.
-            // If we just replace the array, we ensure they lose deprecated ones too (if that's desired).
-            // Let's effectively "merge" by adding all new ones, 
-            // OR we can just set it to `allPermissionIds` if Admin represents "System Administrator" who can do everything.
-            // Assuming Admin == Super User, setting it to `allPermissionIds` ensures they have exactly the supported set.
-
-            // However, to be safe and avoiding removing custom stuff if they manually added weird things (unlikely for Admin), 
-            // let's use addToSet logic but optimally we just set it.
-            // Given the request "whenever created... assign to admin", setting the list is cleaner.
-
-            adminRole.permissions = allPermissionIds;
-            await adminRole.save();
-            console.log(`Updated Admin role with ${allPermissionIds.length} permissions.`);
+            // Add all permissions found in the database to the Admin role's array
+            await Role.updateOne(
+                { _id: adminRole._id },
+                { $addToSet: { permissions: { $each: allDbPermissionIds } } }
+            );
+            console.log(`Updated Admin role by ensuring all ${allDbPermissionIds.length} DB permissions are assigned.`);
         } else {
-            console.warn('Admin role not found. Skipping auto-assignment.');
+            console.warn('System Admin role not found. Skipping auto-assignment.');
         }
 
         console.log('Permissions synced successfully.');

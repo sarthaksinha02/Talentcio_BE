@@ -23,6 +23,26 @@ const seedWildcard = async () => {
             console.log('Wildcard Permission already exists');
         }
 
+        // --- TALENT ACQUISITION PERMISSIONS ---
+        const taPermissions = [
+            { key: 'ta.view', description: 'View Talent Acquisition module', module: 'TALENT ACQUISITION' },
+            { key: 'ta.create', description: 'Create Hiring Requests and Candidates', module: 'TALENT ACQUISITION' },
+            { key: 'ta.edit', description: 'Edit Hiring Requests and Candidates', module: 'TALENT ACQUISITION' },
+            { key: 'ta.delete', description: 'Delete Hiring Requests and Candidates', module: 'TALENT ACQUISITION' },
+            { key: 'ta.decision', description: 'Make Hiring Decisions', module: 'TALENT ACQUISITION' },
+            { key: 'ta.hiring_request.manage', description: 'Manage Hiring Requests (Approve/Reject)', module: 'TALENT ACQUISITION' }
+        ];
+
+        for (const perm of taPermissions) {
+            const existing = await Permission.findOne({ key: perm.key });
+            if (!existing) {
+                await Permission.create(perm);
+                console.log(`Created Permission: ${perm.key}`);
+            } else {
+                console.log(`Permission already exists: ${perm.key}`);
+            }
+        }
+
         // 2. Find or Create "System Admin" Role and Assign Wildcard
         let systemAdmin = await Role.findOne({ name: 'System Admin' });
 

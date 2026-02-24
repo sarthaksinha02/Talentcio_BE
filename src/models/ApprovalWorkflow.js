@@ -12,6 +12,7 @@ const ApprovalWorkflowSchema = new mongoose.Schema({
         isFinal: { type: Boolean, default: false }
     }],
 
+    module: { type: String, enum: ['TA', 'Helpdesk'], default: 'TA' },
     isActive: { type: Boolean, default: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 

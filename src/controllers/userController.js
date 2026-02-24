@@ -184,19 +184,23 @@ const getMyself = async (req, res) => {
 
         // Flatten unique permission keys (same logic as loginUser)
         let permissions = [...new Set(
-            user.roles.flatMap(role => (role.permissions || []).map(p => p.key))
+            user.roles.flatMap(role => (role.permissions || []).filter(p => p).map(p => p.key))
         )];
 
-        // Also fetch subordinates
+        // Count subordinates — used by frontend for approval tab visibility
+        const directReportsCount = await User.countDocuments({ reportingManagers: req.user._id });
+
+        // Also fetch subordinate list (for Profile page)
         const subordinates = await User.find({ reportingManagers: req.user._id })
             .select('firstName lastName email role department');
 
         res.json({
             ...user.toObject(),
-            roles: user.roles,                   // Full objects so Profile.jsx can read r.name
+            roles: user.roles,                    // Full objects so Profile.jsx can read r.name
             roleNames: user.roles.map(r => r.name), // Flat names array for AuthContext
             permissions,
-            directReports: subordinates
+            directReports: subordinates,
+            directReportsCount                    // Added: needed by Leaves.jsx hasApprovalAccess
         });
     } catch (error) {
         console.error(error);

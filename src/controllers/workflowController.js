@@ -3,7 +3,7 @@ const ApprovalWorkflow = require('../models/ApprovalWorkflow');
 // --- Create Workflow ---
 exports.createWorkflow = async (req, res) => {
     try {
-        const { name, description, levels } = req.body;
+        const { name, description, levels, module } = req.body;
 
         const workflow = await ApprovalWorkflow.create({
             name,
@@ -14,6 +14,7 @@ exports.createWorkflow = async (req, res) => {
                 approvers: l.approvers || [],
                 isFinal: l.isFinal
             })),
+            module: module || 'TA', // Default to TA if not provided
             isActive: true, // Default to active
             createdBy: req.user._id
         });
@@ -28,7 +29,12 @@ exports.createWorkflow = async (req, res) => {
 // --- Get All Workflows ---
 exports.getWorkflows = async (req, res) => {
     try {
-        const workflows = await ApprovalWorkflow.find({})
+        const query = {};
+        if (req.query.module) {
+            query.module = req.query.module;
+        }
+
+        const workflows = await ApprovalWorkflow.find(query)
             .populate('levels.role', 'name')
             .populate('levels.approvers', 'firstName lastName email');
         res.status(200).json(workflows);

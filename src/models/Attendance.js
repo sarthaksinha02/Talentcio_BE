@@ -26,8 +26,15 @@ const attendanceSchema = new mongoose.Schema({
     ipAddress: String,
     location: {
         lat: Number,
-        lng: Number
+        lng: Number,
+        accuracy: Number
     },
+    clockOutLocation: {
+        lat: Number,
+        lng: Number,
+        accuracy: Number
+    },
+    userAgent: String,
     notes: String,
     approvalStatus: {
         type: String,
@@ -38,7 +45,11 @@ const attendanceSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
-    rejectionReason: String
+    rejectionReason: String,
+    timesheetSyncError: {
+        type: Boolean,
+        default: false
+    }
 }, { timestamps: true });
 
 // Ensure one entry per user per day

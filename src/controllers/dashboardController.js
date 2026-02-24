@@ -47,10 +47,14 @@ const getDashboardStats = async (req, res) => {
             const record = todaysAttendance.find(a => a.user.toString() === user._id.toString());
             let status = 'ABSENT';
             let checkInTime = null;
+            let location = null;
+            let clockOutLocation = null;
 
             if (record) {
                 status = record.status || 'PRESENT';
                 checkInTime = record.clockIn;
+                location = record.location;
+                clockOutLocation = record.clockOutLocation;
             }
 
             return {
@@ -61,7 +65,10 @@ const getDashboardStats = async (req, res) => {
                     avatar: null
                 },
                 time: checkInTime,
-                status: status
+                clockOut: record ? record.clockOut : null,
+                status: status,
+                location: location,
+                clockOutLocation: clockOutLocation
             };
         });
 

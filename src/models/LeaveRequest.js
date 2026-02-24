@@ -8,8 +8,9 @@ const leaveRequestSchema = new mongoose.Schema({
     },
     leaveType: {
         type: String,
-        required: true,
-        enum: ['CL', 'SL', 'EL', 'LOP', 'WFH']
+        required: true
+        // Note: Validation against active policies is handled in leaveController,
+        // not hardcoded here, so custom leave types from LeaveConfig will work.
     },
     startDate: {
         type: Date,
