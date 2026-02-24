@@ -8,8 +8,8 @@ const leaveBalanceSchema = new mongoose.Schema({
     },
     leaveType: {
         type: String,
-        required: true, // CL, SL, EL
-        enum: ['CL', 'SL', 'EL', 'LOP', 'WFH']
+        required: true // CL, SL, EL, or any custom type from LeaveConfig
+        // Enum removed: custom types are validated at controller level
     },
     year: {
         type: Number,

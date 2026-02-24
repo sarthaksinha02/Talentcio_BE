@@ -17,10 +17,7 @@ const calculateLeaveDays = async (startDate, endDate, leavePolicy) => {
     const days = eachDayOfInterval({ start: startDate, end: endDate });
     let count = 0;
 
-    // 2. Fetch Holidays if needed (Optimization: pass holidays if repetitive)
-    // We fetch all holidays in year range to be safe
-    const startYear = startDate.getFullYear();
-    const endYear = endDate.getFullYear();
+    // 2. Fetch Holidays within the date range
     const holidayDocs = await Holiday.find({
         date: { $gte: startDate, $lte: endDate }
     });

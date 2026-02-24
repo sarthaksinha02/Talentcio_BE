@@ -58,9 +58,8 @@ const loginUser = async (req, res) => {
         }).populate('reportingManagers', 'firstName lastName');
 
         if (user && (await user.matchPassword(password))) {
-            // Flatten unique permissions
             let permissions = [...new Set(
-                user.roles.flatMap(role => role.permissions.map(p => p.key))
+                user.roles.flatMap(role => (role.permissions || []).filter(p => p).map(p => p.key))
             )];
 
             // Wildcard Expansion: If user has '*', provide ALL permissions

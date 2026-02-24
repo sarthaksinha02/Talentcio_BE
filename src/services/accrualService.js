@@ -19,10 +19,14 @@ const runMonthlyAccrual = async () => {
     let updates = 0;
 
     for (const user of users) {
+        const userEmploymentType = user.employmentType || 'Full Time';
+
         for (const config of configs) {
-            // Check if filtering by employee type applies
-            // Simplified: Assume 'All' or matches. 
-            // In real app, check user.employmentType vs config.employeeTypes
+            // Filter: skip if this policy is restricted to employment types that don't include this user
+            if (config.employeeTypes && config.employeeTypes.length > 0 &&
+                !config.employeeTypes.includes(userEmploymentType)) {
+                continue;
+            }
 
             let balance = await LeaveBalance.findOne({ user: user._id, leaveType: config.leaveType, year: currentYear });
 
@@ -31,16 +35,17 @@ const runMonthlyAccrual = async () => {
                 balance = await LeaveBalance.create({ user: user._id, leaveType: config.leaveType, year: currentYear });
             }
 
-            // Add Accrual
-            // Check Max Limit
+            // Add Accrual, capped at maxLimitPerYear if set
             const proposedAccrual = balance.accrued + config.accrualAmount;
 
             if (config.maxLimitPerYear > 0 && proposedAccrual > config.maxLimitPerYear) {
-                // Cap it ? Or allow accrual but cap utilization? Usually cap accrual.
                 balance.accrued = config.maxLimitPerYear;
             } else {
                 balance.accrued = proposedAccrual;
             }
+
+            // Keep closingBalance in sync
+            balance.closingBalance = balance.openingBalance + balance.accrued - balance.utilized;
 
             await balance.save();
             updates++;

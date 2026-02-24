@@ -1,4 +1,5 @@
 const LeaveConfig = require('../models/LeaveConfig');
+const LeaveBalance = require('../models/LeaveBalance'); // Added for balance recalculation
 
 // @desc    Get all leave policies
 // @route   GET /api/leaves/config
@@ -48,6 +49,35 @@ const updateLeavePolicy = async (req, res) => {
             policy.proRata = proRata !== undefined ? proRata : policy.proRata;
 
             await policy.save();
+
+            // RECALCULATE PROPAGATION LOGIC: Auto-update existing LeaveBalance records 
+            // for the current year to reflect the newly edited rules.
+            try {
+                const currentYear = new Date().getFullYear();
+                let newAccruedValue = 0;
+
+                if (policy.accrualType === 'Yearly') {
+                    newAccruedValue = policy.accrualAmount;
+                } else if (policy.accrualType === 'Monthly') {
+                    const currentMonth = new Date().getMonth() + 1; // 1-12
+                    newAccruedValue = policy.accrualAmount * currentMonth;
+                    if (policy.maxLimitPerYear > 0 && newAccruedValue > policy.maxLimitPerYear) {
+                        newAccruedValue = policy.maxLimitPerYear;
+                    }
+                } else if (policy.accrualType === 'Policy') {
+                    newAccruedValue = policy.accrualAmount || 0;
+                }
+
+                // Update all current year balances for this policy across all users
+                await LeaveBalance.updateMany(
+                    { leaveType: policy.leaveType, year: currentYear },
+                    { $set: { accrued: newAccruedValue } }
+                );
+            } catch (calcError) {
+                console.error('[LeaveConfig Update] Failed to propagate balance changes:', calcError);
+                // System logs error, but policy itself still saved successfully.
+            }
+
             return res.json(policy);
         } else {
             // Create New

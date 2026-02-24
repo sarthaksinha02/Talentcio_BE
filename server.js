@@ -1,9 +1,39 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
 const connectDB = require('./db');
 
 const app = express();
+const server = http.createServer(app);
+
+// Setup Socket.IO
+const io = new Server(server, {
+    cors: {
+        origin: "*", // Or specific frontend domains in production
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+    }
+});
+
+// Expose io to routes
+app.set('io', io);
+
+// Socket Event Listeners
+io.on('connection', (socket) => {
+    // console.log(`User connected to socket: ${socket.id}`);
+
+    // Join a specific query room for real-time ticket updates
+    socket.on('join_query', (queryId) => {
+        socket.join(queryId);
+        // console.log(`Socket ${socket.id} joined room ${queryId}`);
+    });
+
+    socket.on('disconnect', () => {
+        // console.log(`User disconnected from socket: ${socket.id}`);
+    });
+});
+
 const PORT = process.env.PORT || 5000;
 
 // Middleware
@@ -27,6 +57,7 @@ require('./src/models/Candidate');
 
 // Services
 const syncPermissions = require('./src/services/permissionSync');
+const startEscalationCron = require('./src/services/escalationCron');
 
 // Routes
 const authRoutes = require('./src/routes/authRoutes');
@@ -41,11 +72,14 @@ const dossierRoutes = require('./src/routes/dossierRoutes');
 const talentAcquisitionRoutes = require('./src/routes/talentAcquisitionRoutes');
 const candidateRoutes = require('./src/routes/candidateRoutes');
 const workflowRoutes = require('./src/routes/workflowRoutes');
+const meetingRoutes = require('./src/routes/meetingRoutes');
+const helpdeskRoutes = require('./src/routes/helpdeskRoutes');
 
 // Database Connection & Init
 const initServer = async () => {
     await connectDB();
     await syncPermissions();
+    startEscalationCron(); // Start the background Helpdesk escalation job
 };
 initServer();
 
@@ -62,14 +96,16 @@ app.use('/api/dossier', dossierRoutes);
 app.use('/api/ta', talentAcquisitionRoutes);
 app.use('/api/ta/candidates', candidateRoutes);
 app.use('/api/workflows', workflowRoutes);
+app.use('/api/meetings', meetingRoutes);
+app.use('/api/helpdesk', helpdeskRoutes);
 
 app.get('/', (req, res) => {
     res.json({ message: 'TalentCio API is running' });
 });
 
 // Start Server
-const server = app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+server.listen(PORT, () => {
+    console.log(`Server & Socket.IO running on port ${PORT}`);
 });
 
 // Handle unhandled promise rejections

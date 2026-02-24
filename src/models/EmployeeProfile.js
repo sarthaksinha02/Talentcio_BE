@@ -62,7 +62,7 @@ const employeeProfileSchema = new mongoose.Schema({
         disabilityStatus: { type: Boolean, default: false },
         disabilityDetails: String,
         medicalConditions: { type: String, select: false }, // Confidential
-        dietaryPreference: { type: String, enum: ['Veg', 'Non-Veg', 'Vegan', 'Egg'] },
+
         hobbies: [String]
     },
 

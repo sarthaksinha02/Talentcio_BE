@@ -4,6 +4,35 @@ const LeaveConfig = require('../models/LeaveConfig');
 const User = require('../models/User');
 const { calculateLeaveDays } = require('../utils/leaveUtils');
 
+// Helper to initialize balance dynamically based on policy
+const initializeBalance = async (userId, policy, year) => {
+    let initialAccrued = 0;
+
+    if (policy.accrualType === 'Yearly') {
+        initialAccrued = policy.accrualAmount;
+    } else if (policy.accrualType === 'Monthly') {
+        const currentMonth = new Date().getMonth() + 1; // 1-12
+        initialAccrued = policy.accrualAmount * currentMonth;
+        if (policy.maxLimitPerYear > 0 && initialAccrued > policy.maxLimitPerYear) {
+            initialAccrued = policy.maxLimitPerYear;
+        }
+    } else if (policy.accrualType === 'Policy') {
+        // Special case for fixed policies that might grant full amount
+        initialAccrued = policy.accrualAmount || 0;
+    }
+
+    return await LeaveBalance.create({
+        user: userId,
+        leaveType: policy.leaveType,
+        year: year,
+        openingBalance: 0,
+        accrued: initialAccrued,
+        utilized: 0,
+        encashed: 0,
+        closingBalance: initialAccrued
+    });
+};
+
 // @desc    Apply for Leave
 // @route   POST /api/leaves/apply
 // @access  Private
@@ -18,6 +47,11 @@ const applyLeave = async (req, res) => {
             return res.status(400).json({ message: 'Invalid or inactive leave type' });
         }
 
+        const userEmploymentType = req.user.employmentType || 'Full Time';
+        if (policy.employeeTypes && policy.employeeTypes.length > 0 && !policy.employeeTypes.includes(userEmploymentType)) {
+            return res.status(403).json({ message: 'You are not eligible for this leave type based on your employment type.' });
+        }
+
         // 2. Validate Backdated
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -26,7 +60,25 @@ const applyLeave = async (req, res) => {
             return res.status(400).json({ message: 'Backdated leave is not allowed for this leave type' });
         }
 
-        // 3. Calculate Days
+        // 3. Check for Overlapping Leave Requests
+        const reqStart = new Date(startDate);
+        const reqEnd = new Date(endDate);
+        const overlapping = await LeaveRequest.findOne({
+            user: userId,
+            status: { $in: ['Pending', 'Approved'] },
+            // Two ranges overlap when: existingStart <= reqEnd AND existingEnd >= reqStart
+            startDate: { $lte: reqEnd },
+            endDate: { $gte: reqStart }
+        });
+
+        if (overlapping) {
+            const fmt = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+            return res.status(400).json({
+                message: `Dates overlap with an existing ${overlapping.status.toLowerCase()} leave (${overlapping.leaveType}: ${fmt(overlapping.startDate)} – ${fmt(overlapping.endDate)}). Please choose different dates.`
+            });
+        }
+
+        // 4. Calculate Days
         let daysCount = 0;
         if (isHalfDay) {
             daysCount = 0.5;
@@ -42,29 +94,39 @@ const applyLeave = async (req, res) => {
             return res.status(400).json({ message: 'Invalid date range (0 working days selected)' });
         }
 
-        // 4. Check Balance
+        // 5. Check Balance
         const currentYear = new Date().getFullYear();
         let balance = await LeaveBalance.findOne({ user: userId, leaveType, year: currentYear });
 
-        // Auto-create balance if missing (User first time)
+        // Auto-create balance if missing
         if (!balance) {
-            balance = await LeaveBalance.create({ user: userId, leaveType, year: currentYear, openingBalance: 0 });
+            balance = await initializeBalance(userId, policy, currentYear);
         }
 
         // Calculate Available
         const available = balance.openingBalance + balance.accrued - balance.utilized;
 
         // Validation
-        if (!policy.allowNegativeBalance && daysCount > available) {
+        if (policy.accrualAmount !== 0 && !policy.allowNegativeBalance && daysCount > available) {
             return res.status(400).json({
                 message: `Insufficient balance. Available: ${available}, Requested: ${daysCount}`
             });
         }
 
-        // 5. Create Request
+        // 6. Validate Required Proof
+        if (policy.proofRequiredAbove > 0 && daysCount > policy.proofRequiredAbove) {
+            if (!documents || !Array.isArray(documents) || documents.length === 0) {
+                return res.status(400).json({
+                    message: `Proof document is mandatory for ${policy.leaveType} exceeding ${policy.proofRequiredAbove} days.`
+                });
+            }
+        }
+
+        // 7. Create Request
         const leaveRequest = await LeaveRequest.create({
             user: userId,
             leaveType,
+
             startDate,
             endDate,
             isHalfDay,
@@ -109,22 +171,21 @@ const getMyBalances = async (req, res) => {
 
         // Filter policies based on user employment type (Strict Check)
         const userEmploymentType = req.user.employmentType || 'Full Time';
-        const policies = allPolicies.filter(p => p.employeeTypes && p.employeeTypes.includes(userEmploymentType));
+        const policies = allPolicies.filter(p =>
+            !p.employeeTypes ||
+            p.employeeTypes.length === 0 ||
+            p.employeeTypes.includes(userEmploymentType)
+        );
 
         const balances = [];
 
         for (const policy of policies) {
             let balance = await LeaveBalance.findOne({ user: req.user._id, leaveType: policy.leaveType, year });
 
-            // If no balance record, assume 0
+            // If no balance record, initialize it based on the policy rules
             if (!balance) {
-                balance = {
-                    leaveType: policy.leaveType,
-                    openingBalance: 0,
-                    accrued: 0,
-                    utilized: 0,
-                    closingBalance: 0
-                };
+                balance = await initializeBalance(req.user._id, policy, year);
+                balance = balance.toObject();
             } else {
                 // Calculate virtual closing
                 balance = balance.toObject();
@@ -134,7 +195,9 @@ const getMyBalances = async (req, res) => {
             balances.push({
                 ...balance,
                 policyName: policy.name,
-                policyDescription: policy.description
+                policyDescription: policy.description,
+                policyAccrualAmount: policy.accrualAmount, // Pass down to frontend for checking Unlimited (0)
+                proofRequiredAbove: policy.proofRequiredAbove
             });
         }
 
@@ -150,19 +213,27 @@ const getMyBalances = async (req, res) => {
 // @access  Private (Manager)
 const getManagerApprovals = async (req, res) => {
     try {
-        // 1. Find Subordinates
-        const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
-        const subordinateIds = subordinates.map(u => u._id);
+        const isAdmin = req.user.roles && req.user.roles.some(r =>
+            (typeof r === 'string' ? r : r.name) === 'Admin'
+        );
 
-        if (subordinateIds.length === 0) {
-            return res.json([]);
+        let query = { status: 'Pending' };
+
+        if (!isAdmin) {
+            // Managers only see their direct reports' requests
+            const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
+            const subordinateIds = subordinates.map(u => u._id);
+
+            if (subordinateIds.length === 0) {
+                return res.json([]);
+            }
+            query.user = { $in: subordinateIds };
         }
+        // Admins: no user filter — see all pending requests across the org
 
-        // 2. Find Requests
-        const requests = await LeaveRequest.find({
-            user: { $in: subordinateIds },
-            status: 'Pending'
-        }).populate('user', 'firstName lastName email employeeCode').sort({ createdAt: 1 });
+        const requests = await LeaveRequest.find(query)
+            .populate('user', 'firstName lastName email employeeCode')
+            .sort({ createdAt: 1 });
 
         res.json(requests);
     } catch (error) {
@@ -185,15 +256,18 @@ const updateLeaveStatus = async (req, res) => {
             return res.status(404).json({ message: 'Request not found' });
         }
 
-        // Verify Authority (Is Manager?)
+        // Verify Authority: must be a direct reporting manager OR have an admin role
         const employee = await User.findById(request.user);
-        const isManager = employee.reportingManagers.some(rm => rm.toString() === managerId.toString()) || req.user.roles.includes('Admin'); // Fallback if admin
+        if (!employee) {
+            return res.status(404).json({ message: 'Employee not found' });
+        }
+        const isManager = employee.reportingManagers.some(rm => rm.toString() === managerId.toString());
+        const isAdmin = req.user.roles && req.user.roles.some(r =>
+            (typeof r === 'string' ? r : r.name) === 'Admin'
+        );
 
-        if (!isManager) {
-            // Check if Admin role exists conceptually, or based on permissions. 
-            // Simplification: Check strict manager relationship
-            // Actually, let's allow if user has permission 'leave.approve' or is manager
-            // For now, strict manager check
+        if (!isManager && !isAdmin) {
+            return res.status(403).json({ message: 'Not authorized to approve this request' });
         }
 
         // Double check: if already processed
@@ -217,6 +291,7 @@ const updateLeaveStatus = async (req, res) => {
             }
 
             balance.utilized += request.daysCount;
+            balance.closingBalance = balance.openingBalance + balance.accrued - balance.utilized;
             await balance.save();
         }
 
@@ -238,10 +313,50 @@ const updateLeaveStatus = async (req, res) => {
     }
 };
 
+// @desc    Cancel a pending leave request (by the employee themselves)
+// @route   PUT /api/leaves/cancel/:id
+// @access  Private
+const cancelLeave = async (req, res) => {
+    const requestId = req.params.id;
+    const userId = req.user._id;
+
+    try {
+        const request = await LeaveRequest.findById(requestId);
+
+        if (!request) {
+            return res.status(404).json({ message: 'Request not found' });
+        }
+
+        // Only the owner can cancel their own request
+        if (request.user.toString() !== userId.toString()) {
+            return res.status(403).json({ message: 'Not authorized to cancel this request' });
+        }
+
+        if (request.status !== 'Pending') {
+            return res.status(400).json({ message: `Cannot cancel a request that is already ${request.status}` });
+        }
+
+        request.status = 'Cancelled';
+        request.auditLog.push({
+            action: 'Cancelled',
+            by: userId,
+            comment: 'Cancelled by employee'
+        });
+
+        await request.save();
+        res.json({ message: 'Leave request cancelled successfully', request });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
 module.exports = {
     applyLeave,
     getMyLeaves,
     getMyBalances,
     getManagerApprovals,
-    updateLeaveStatus
+    updateLeaveStatus,
+    cancelLeave
 };
