@@ -74,17 +74,12 @@ exports.updateWorkflow = async (req, res) => {
     }
 };
 
-// --- Delete/Deactivate Workflow ---
+// --- Delete Workflow ---
 exports.deleteWorkflow = async (req, res) => {
     try {
-        // Soft delete
-        const workflow = await ApprovalWorkflow.findByIdAndUpdate(
-            req.params.id,
-            { isActive: false },
-            { new: true }
-        );
+        const workflow = await ApprovalWorkflow.findByIdAndDelete(req.params.id);
         if (!workflow) return res.status(404).json({ message: 'Workflow not found' });
-        res.status(200).json({ message: 'Workflow deactivated' });
+        res.status(200).json({ message: 'Workflow deleted successfully' });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error', error: error.message });

@@ -6,7 +6,7 @@ const InterviewWorkflow = require('../models/InterviewWorkflow');
 exports.createInterviewWorkflow = async (req, res) => {
     try {
         const { name, description, rounds } = req.body;
-        
+
         const existingWorkflow = await InterviewWorkflow.findOne({ name });
         if (existingWorkflow) {
             return res.status(400).json({ message: 'Interview workflow with this name already exists' });
@@ -51,7 +51,7 @@ exports.getInterviewWorkflowById = async (req, res) => {
         const workflow = await InterviewWorkflow.findById(req.params.id)
             .populate('rounds.role', 'name description')
             .populate('createdBy', 'firstName lastName email');
-        
+
         if (!workflow) {
             return res.status(404).json({ message: 'Interview workflow not found' });
         }
@@ -68,7 +68,7 @@ exports.getInterviewWorkflowById = async (req, res) => {
 exports.updateInterviewWorkflow = async (req, res) => {
     try {
         const { name, description, rounds, isActive } = req.body;
-        
+
         let workflow = await InterviewWorkflow.findById(req.params.id);
         if (!workflow) {
             return res.status(404).json({ message: 'Interview workflow not found' });
@@ -88,12 +88,12 @@ exports.updateInterviewWorkflow = async (req, res) => {
         workflow.isActive = isActive !== undefined ? isActive : workflow.isActive;
 
         await workflow.save();
-        
+
         // Populate to match GET outputs
         const updatedWorkflow = await InterviewWorkflow.findById(workflow._id)
             .populate('rounds.role', 'name description')
             .populate('createdBy', 'firstName lastName email');
-            
+
         res.json(updatedWorkflow);
     } catch (error) {
         console.error('Error updating interview workflow:', error);

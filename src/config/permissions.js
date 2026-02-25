@@ -253,5 +253,17 @@ module.exports = [
         key: "ta.super_approve",
         module: "TA",
         description: "Force approve or reject any hiring request regardless of workflow assignment"
+    },
+
+    // DISCUSSIONS
+    {
+        key: "discussion.read",
+        module: "DISCUSSION",
+        description: "View discussions"
+    },
+    {
+        key: "discussion.create",
+        module: "DISCUSSION",
+        description: "Create discussions"
     }
 ];

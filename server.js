@@ -78,6 +78,7 @@ const meetingRoutes = require('./src/routes/meetingRoutes');
 const helpdeskRoutes = require('./src/routes/helpdeskRoutes');
 const interviewWorkflowRoutes = require('./src/routes/interviewWorkflowRoutes');
 const notificationRoutes = require('./src/routes/notificationRoutes');
+const discussionRoutes = require('./src/routes/discussionRoutes');
 
 // Database Connection & Init
 const initServer = async () => {
@@ -104,6 +105,7 @@ app.use('/api/workflows', workflowRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/helpdesk', helpdeskRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/discussions', discussionRoutes);
 
 app.get('/', (req, res) => {
     res.json({ message: 'TalentCio API is running' });
