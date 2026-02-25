@@ -154,7 +154,7 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
         // Verify if user has access to see all candidates vs only assigned ones
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
-        const hasTaManage = userPermissions.includes('ta.hiring_request.manage') || userPermissions.includes('*');
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
         // Check if user is creator/HM/recruiter/approver of the hiring request
         const hiringRequest = await HiringRequest.findById(hiringRequestId);
@@ -169,7 +169,7 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
 
         let query = { hiringRequestId };
 
-        if (!isAdmin && !hasTaManage && !isRequestParticipant) {
+        if (!isAdmin && !hasTaView && !isRequestParticipant) {
             // User is likely just an interviewer. Only show candidates they are assigned to.
             query['interviewRounds.assignedTo'] = req.user._id;
         }
@@ -209,7 +209,7 @@ exports.getCandidateById = async (req, res) => {
         // Verify if user has access to see this candidate
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
-        const hasTaManage = userPermissions.includes('ta.hiring_request.manage') || userPermissions.includes('*');
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
         const hiringRequest = candidate.hiringRequestId; // populated object
 
@@ -222,11 +222,12 @@ exports.getCandidateById = async (req, res) => {
             ))
         );
 
+        // Check if they are assigned to any round for this candidate
         const isAssignedInterviewer = candidate.interviewRounds?.some(round =>
             round.assignedTo?.some(ass => ass._id?.toString() === req.user._id.toString() || ass.toString() === req.user._id.toString())
         );
 
-        if (!isAdmin && !hasTaManage && !isRequestParticipant && !isAssignedInterviewer) {
+        if (!isAdmin && !hasTaView && !isRequestParticipant && !isAssignedInterviewer) {
             return res.status(403).json({ message: 'Forbidden: You do not have permission to view this candidate' });
         }
 

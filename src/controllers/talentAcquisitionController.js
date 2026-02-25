@@ -106,12 +106,12 @@ exports.getHiringRequests = async (req, res) => {
         if (status) query.status = status;
 
         // Use permissions to filter what they see
-        // Admin/HR/Manage sees all. Manager sees own.
+        // Admin/HR sees all. ta.view sees all. Manager sees own.
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
-        const hasTaManage = userPermissions.includes('ta.hiring_request.manage') || userPermissions.includes('*');
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
-        if (!isAdmin && !hasTaManage) {
+        if (!isAdmin && !hasTaView) {
             // Find HRRs where the user is assigned to a candidate's interview round (granular)
             const candidatesWithUserAsInterviewer = await Candidate.find({
                 'interviewRounds.assignedTo': req.user._id
@@ -123,7 +123,6 @@ exports.getHiringRequests = async (req, res) => {
                 { createdBy: req.user._id },
                 { 'ownership.hiringManager': req.user._id },
                 { 'ownership.recruiter': req.user._id },
-                { 'approvalChain.approvers': req.user._id }, // Approvers
                 { _id: { $in: interviewHiringRequestIds } } // Only HRRs where they have a specific candidate interview assignment
             ];
         }
@@ -170,17 +169,12 @@ exports.getHiringRequestById = async (req, res) => {
         // Authorization check
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
-        const hasTaManage = userPermissions.includes('ta.hiring_request.manage') || userPermissions.includes('*');
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
-        if (!isAdmin && !hasTaManage) {
+        if (!isAdmin && !hasTaView) {
             const isCreator = request.createdBy?._id?.toString() === req.user._id.toString();
             const isHiringManager = request.ownership?.hiringManager?._id?.toString() === req.user._id.toString();
             const isRecruiter = request.ownership?.recruiter?._id?.toString() === req.user._id.toString();
-
-            // Approver check
-            const isApprover = request.approvalChain?.some(step =>
-                step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
-            );
 
             // Check if user is an assigned interviewer for any candidate in this request (granular check)
             const isInterviewer = await Candidate.exists({
@@ -188,7 +182,7 @@ exports.getHiringRequestById = async (req, res) => {
                 'interviewRounds.assignedTo': req.user._id
             });
 
-            if (!isCreator && !isHiringManager && !isRecruiter && !isApprover && !isInterviewer) {
+            if (!isCreator && !isHiringManager && !isRecruiter && !isInterviewer) {
                 return res.status(403).json({ message: 'Forbidden: You do not have permission to view this request' });
             }
         }
