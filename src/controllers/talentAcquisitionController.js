@@ -1,6 +1,7 @@
 const { HiringRequest, HRRAuditLog } = require('../models/HiringRequest');
 const ApprovalWorkflow = require('../models/ApprovalWorkflow');
 const User = require('../models/User');
+const Candidate = require('../models/Candidate');
 
 // Helper to generate Request ID (e.g., HRR-2023-001)
 const generateRequestId = async () => {
@@ -61,6 +62,20 @@ exports.createHiringRequest = async (req, res) => {
             // Set status based on workflow type
             if (approvals.length > 0) {
                 newRequest.status = 'Pending_Approval'; // Dynamic workflow
+                
+                // Notify first level approvers
+                const currentStep = approvals[0];
+                if (currentStep && currentStep.approvers && currentStep.approvers.length > 0) {
+                    const Notification = require('../models/Notification');
+                    const notifications = currentStep.approvers.map(approverId => ({
+                        user: approverId,
+                        title: 'New Hiring Request Approval',
+                        message: `Hiring Request ${requestId} for ${roleDetails.title} has been submitted and requires your approval.`,
+                        type: 'Approval',
+                        link: `/ta/hiring-request/${newRequest._id}/details`
+                    }));
+                    await Notification.insertMany(notifications);
+                }
             } else {
                 newRequest.status = 'Pending_L1'; // Legacy workflow
             }
@@ -97,11 +112,18 @@ exports.getHiringRequests = async (req, res) => {
         const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
         if (!isAdmin && !hasTaView) {
+            // Find HRRs where the user is assigned to a candidate's interview round (granular)
+            const candidatesWithUserAsInterviewer = await Candidate.find({
+                'interviewRounds.assignedTo': req.user._id
+            }).select('hiringRequestId');
+            
+            const interviewHiringRequestIds = candidatesWithUserAsInterviewer.map(c => c.hiringRequestId);
+
             query['$or'] = [
                 { createdBy: req.user._id },
                 { 'ownership.hiringManager': req.user._id },
                 { 'ownership.recruiter': req.user._id },
-                { 'approvalChain.approvers': req.user._id }
+                { _id: { $in: interviewHiringRequestIds } } // Only HRRs where they have a specific candidate interview assignment
             ];
         }
 
@@ -150,15 +172,17 @@ exports.getHiringRequestById = async (req, res) => {
         const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
         
         if (!isAdmin && !hasTaView) {
-            // Check if user is creator, hiring manager, recruiter, or in approval chain
             const isCreator = request.createdBy?._id?.toString() === req.user._id.toString();
             const isHiringManager = request.ownership?.hiringManager?._id?.toString() === req.user._id.toString();
             const isRecruiter = request.ownership?.recruiter?._id?.toString() === req.user._id.toString();
-            const isApprover = request.approvalChain?.some(step => 
-                step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
-            );
 
-            if (!isCreator && !isHiringManager && !isRecruiter && !isApprover) {
+            // Check if user is an assigned interviewer for any candidate in this request (granular check)
+            const isInterviewer = await Candidate.exists({
+                hiringRequestId: request._id,
+                'interviewRounds.assignedTo': req.user._id
+            });
+
+            if (!isCreator && !isHiringManager && !isRecruiter && !isInterviewer) {
                 return res.status(403).json({ message: 'Forbidden: You do not have permission to view this request' });
             }
         }
@@ -333,9 +357,35 @@ exports.approveHiringRequest = async (req, res) => {
             if (currentLevelIndex + 1 < request.approvalChain.length) {
                 request.currentApprovalLevel += 1;
                 request.status = 'Pending_Approval';
+
+                // Notify next level approvers
+                const nextStep = request.approvalChain[request.currentApprovalLevel - 1];
+                if (nextStep && nextStep.approvers && nextStep.approvers.length > 0) {
+                    const Notification = require('../models/Notification');
+                    const notifications = nextStep.approvers.map(approverId => ({
+                        user: approverId,
+                        title: 'Hiring Request Approval Pending',
+                        message: `Hiring Request ${request.requestId} for ${request.roleDetails.title} has reached your approval level.`,
+                        type: 'Approval',
+                        link: `/ta/hiring-request/${request._id}/details`
+                    }));
+                    await Notification.insertMany(notifications);
+                }
             } else {
                 // All levels approved
                 request.status = 'Approved';
+
+                // Notify creator that it is fully approved
+                if (request.createdBy) {
+                    const Notification = require('../models/Notification');
+                    await Notification.create({
+                        user: request.createdBy,
+                        title: 'Hiring Request Approved',
+                        message: `Your Hiring Request ${request.requestId} for ${request.roleDetails.title} has been fully approved.`,
+                        type: 'Info',
+                        link: `/ta/hiring-request/${request._id}/details`
+                    });
+                }
             }
         }
         // --- Legacy Logic (L1/Final) ---
@@ -352,6 +402,18 @@ exports.approveHiringRequest = async (req, res) => {
                 }
                 request.approvals.final = { status: 'Approved', approver: req.user._id, date: new Date(), comments };
                 request.status = 'Approved';
+                
+                // Notify creator
+                if (request.createdBy) {
+                    const Notification = require('../models/Notification');
+                    await Notification.create({
+                        user: request.createdBy,
+                        title: 'Hiring Request Approved',
+                        message: `Your Hiring Request ${request.requestId} has been fully approved.`,
+                        type: 'Info',
+                        link: `/ta/hiring-request/${request._id}/details`
+                    });
+                }
             } else {
                 return res.status(400).json({ message: 'Invalid approval level' });
             }

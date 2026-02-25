@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Role = require('../models/Role');
 const { HiringRequest } = require('../models/HiringRequest');
+const Candidate = require('../models/Candidate');
 
 // @desc    Get All Users
 // @route   GET /api/users
@@ -195,15 +196,24 @@ const getMyself = async (req, res) => {
         const subordinates = await User.find({ reportingManagers: req.user._id })
             .select('firstName lastName email role department');
 
-        // Check TA Participation
+        // Check TA Participation (Creator, HM, Recruiter only — NOT approvers, as those are role-based workflow assignments)
         const taCount = await HiringRequest.countDocuments({
             $or: [
                 { createdBy: req.user._id },
                 { 'ownership.hiringManager': req.user._id },
-                { 'ownership.recruiter': req.user._id },
-                { 'approvalChain.approvers': req.user._id }
+                { 'ownership.recruiter': req.user._id }
             ]
         });
+
+        // Check if they are an interviewer via per-candidate round assignment (precise check)
+        let isInterviewer = false;
+        let interviewCount = 0;
+        if (taCount === 0 && !permissions.includes('ta.view') && !permissions.includes('*')) {
+            interviewCount = await Candidate.countDocuments({
+                'interviewRounds.assignedTo': req.user._id
+            });
+            isInterviewer = interviewCount > 0;
+        }
 
         res.json({
             ...user.toObject(),
@@ -212,7 +222,7 @@ const getMyself = async (req, res) => {
             permissions,
             directReports: subordinates,
             directReportsCount,                   // Added: needed by Leaves.jsx hasApprovalAccess
-            isTAParticipant: taCount > 0
+            isTAParticipant: taCount > 0 || isInterviewer
         });
     } catch (error) {
         console.error(error);
@@ -236,6 +246,48 @@ const getUserById = async (req, res) => {
     }
 };
 
+// TEMP DEBUG: Remove after fixing isTAParticipant issue
+const debugTA = async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).populate({ path: 'roles', populate: { path: 'permissions' } });
+        const permissions = [...new Set(user.roles.flatMap(r => (r.permissions || []).filter(p => p).map(p => p.key)))];
+
+        const taParticipantHRRs = await HiringRequest.find({
+            $or: [
+                { createdBy: req.user._id },
+                { 'ownership.hiringManager': req.user._id },
+                { 'ownership.recruiter': req.user._id }
+            ]
+        }).select('requestId createdBy ownership.hiringManager ownership.recruiter');
+
+        const panelHRRs = await HiringRequest.find({
+            'ownership.interviewPanel': req.user._id
+        }).select('requestId');
+
+        const assignedCandidates = await Candidate.find({
+            'interviewRounds.assignedTo': req.user._id
+        }).select('candidateName hiringRequestId');
+
+        const approverHRRs = await HiringRequest.find({
+            'approvalChain.approvers': req.user._id
+        }).select('requestId');
+
+        res.json({
+            userId: req.user._id,
+            email: user.email,
+            roles: user.roles.map(r => r.name),
+            permissions,
+            taParticipantHRRs: taParticipantHRRs.map(h => h.requestId),
+            panelHRRs: panelHRRs.map(h => h.requestId),
+            assignedCandidates: assignedCandidates.map(c => c.candidateName),
+            approverHRRs: approverHRRs.map(h => h.requestId),
+            calculatedIsTAParticipant: taParticipantHRRs.length > 0 || panelHRRs.length > 0 || assignedCandidates.length > 0
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     getUsers,
     createUser,
@@ -243,5 +295,6 @@ module.exports = {
     updateUser,
     getMyTeam,
     getMyself,
-    getUserById
+    getUserById,
+    debugTA
 };

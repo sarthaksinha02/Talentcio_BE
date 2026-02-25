@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const { HiringRequest } = require('../models/HiringRequest');
+const Candidate = require('../models/Candidate');
 const jwt = require('jsonwebtoken');
 
 // Generate JWT Helper
@@ -76,15 +77,23 @@ const loginUser = async (req, res) => {
             // Check if user has subordinates
             const directReportsCount = await User.countDocuments({ reportingManagers: user._id });
 
-            // Check TA Participation
+            // Check TA Participation (Creator, HM, Recruiter only — NOT approvers, as those are role-based workflow assignments)
             const taCount = await HiringRequest.countDocuments({
                 $or: [
                     { createdBy: user._id },
                     { 'ownership.hiringManager': user._id },
-                    { 'ownership.recruiter': user._id },
-                    { 'approvalChain.approvers': user._id }
+                    { 'ownership.recruiter': user._id }
                 ]
             });
+
+            // Check if they are an interviewer via per-candidate round assignment (precise check)
+            let isInterviewer = false;
+            if (taCount === 0 && !permissions.includes('ta.view') && !permissions.includes('*')) {
+                const interviewCount = await Candidate.countDocuments({
+                    'interviewRounds.assignedTo': user._id
+                });
+                isInterviewer = interviewCount > 0;
+            }
 
             res.json({
                 _id: user._id,
@@ -96,7 +105,7 @@ const loginUser = async (req, res) => {
                 roles: user.roles.map(r => r.name),
                 permissions: permissions,
                 directReportsCount: directReportsCount,
-                isTAParticipant: taCount > 0,
+                isTAParticipant: taCount > 0 || isInterviewer,
                 token: generateToken(user._id, user.tokenVersion)
             });
         } else {

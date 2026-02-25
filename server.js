@@ -55,6 +55,7 @@ require('./src/models/LeaveBalance');
 require('./src/models/LeaveRequest');
 require('./src/models/Candidate');
 require('./src/models/InterviewWorkflow');
+require('./src/models/Notification');
 
 // Services
 const syncPermissions = require('./src/services/permissionSync');
@@ -76,6 +77,7 @@ const workflowRoutes = require('./src/routes/workflowRoutes');
 const meetingRoutes = require('./src/routes/meetingRoutes');
 const helpdeskRoutes = require('./src/routes/helpdeskRoutes');
 const interviewWorkflowRoutes = require('./src/routes/interviewWorkflowRoutes');
+const notificationRoutes = require('./src/routes/notificationRoutes');
 
 // Database Connection & Init
 const initServer = async () => {
@@ -101,6 +103,7 @@ app.use('/api/ta/interview-workflows', interviewWorkflowRoutes);
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/helpdesk', helpdeskRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.get('/', (req, res) => {
     res.json({ message: 'TalentCio API is running' });

@@ -24,6 +24,9 @@ router.delete('/:id', protect, authorize('ta.delete'), candidateController.delet
 router.patch('/:id/status', protect, authorize('ta.edit'), candidateController.updateCandidateStatus);
 router.patch('/:id/decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updateCandidateDecision);
 
+// Current User's Scheduled Interviews
+router.get('/my/interviews', protect, candidateController.getMyScheduledInterviews);
+
 // Interview Rounds
 router.post('/:id/rounds', protect, authorize('ta.edit'), candidateController.addInterviewRound);
 router.put('/:id/rounds/:roundId', protect, authorize('ta.edit'), candidateController.updateInterviewRound);

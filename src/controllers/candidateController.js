@@ -151,7 +151,30 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
     try {
         const { hiringRequestId } = req.params;
 
-        const candidates = await Candidate.find({ hiringRequestId })
+        // Verify if user has access to see all candidates vs only assigned ones
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+
+        // Check if user is creator/HM/recruiter/approver of the hiring request
+        const hiringRequest = await HiringRequest.findById(hiringRequestId);
+        const isRequestParticipant = hiringRequest && (
+            hiringRequest.createdBy?._id?.toString() === req.user._id.toString() ||
+            hiringRequest.ownership?.hiringManager?._id?.toString() === req.user._id.toString() ||
+            hiringRequest.ownership?.recruiter?._id?.toString() === req.user._id.toString() ||
+            hiringRequest.approvalChain?.some(step => 
+                step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
+            )
+        );
+
+        let query = { hiringRequestId };
+
+        if (!isAdmin && !hasTaView && !isRequestParticipant) {
+            // User is likely just an interviewer. Only show candidates they are assigned to.
+            query['interviewRounds.assignedTo'] = req.user._id;
+        }
+
+        const candidates = await Candidate.find(query)
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails')
             .sort({ uploadedAt: -1 });
@@ -175,10 +198,37 @@ exports.getCandidateById = async (req, res) => {
         const candidate = await Candidate.findById(id)
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails')
-            .populate('statusHistory.changedBy', 'firstName lastName');
+            .populate('statusHistory.changedBy', 'firstName lastName')
+            .populate('interviewRounds.assignedTo', 'firstName lastName email')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName');
 
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        // Verify if user has access to see this candidate
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+
+        const hiringRequest = candidate.hiringRequestId; // populated object
+        
+        const isRequestParticipant = hiringRequest && (
+            hiringRequest.createdBy?._id?.toString() === req.user._id.toString() ||
+            hiringRequest.ownership?.hiringManager?._id?.toString() === req.user._id.toString() ||
+            hiringRequest.ownership?.recruiter?._id?.toString() === req.user._id.toString() ||
+            (candidate.hiringRequestId.approvalChain && candidate.hiringRequestId.approvalChain.some(step => 
+                step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
+            ))
+        );
+
+        // Check if they are assigned to any round for this candidate
+        const isAssignedInterviewer = candidate.interviewRounds?.some(round => 
+            round.assignedTo?.some(ass => ass._id?.toString() === req.user._id.toString() || ass.toString() === req.user._id.toString())
+        );
+
+        if (!isAdmin && !hasTaView && !isRequestParticipant && !isAssignedInterviewer) {
+            return res.status(403).json({ message: 'Forbidden: You do not have permission to view this candidate' });
         }
 
         res.status(200).json(candidate);
@@ -403,8 +453,26 @@ exports.addInterviewRound = async (req, res) => {
         await candidate.save();
 
         const updatedCandidate = await Candidate.findById(id)
+            .populate('hiringRequestId', 'requestId')
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+
+        // Create notification for assigned interviewers
+        if (assignedTo && assignedTo.length > 0) {
+            const Notification = require('../models/Notification');
+            const notifications = assignedTo.map(userId => ({
+                user: userId,
+                title: 'New Interview Assigned',
+                message: `You have been assigned to evaluate ${candidate.candidateName} for the ${levelName} round.`,
+                type: 'Interview',
+                link: `/ta/hiring-request/${candidate.hiringRequestId._id || candidate.hiringRequestId}/candidate/${candidate._id}/view`,
+                metadata: {
+                    candidateId: candidate._id,
+                    roundId: candidate.interviewRounds[candidate.interviewRounds.length - 1]._id
+                }
+            }));
+            await Notification.insertMany(notifications);
+        }
 
         res.status(201).json({
             message: 'Interview round added successfully',
@@ -476,6 +544,62 @@ exports.deleteInterviewRound = async (req, res) => {
     } catch (error) {
         console.error('Error deleting interview round:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Get current user's scheduled interviews
+exports.getMyScheduledInterviews = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        
+        // Find all candidates that have an interview round assigned to the current user
+        // and its status is 'Scheduled' or 'Pending'
+        const candidates = await Candidate.find({
+            'interviewRounds': {
+                $elemMatch: {
+                    assignedTo: userId,
+                    status: { $in: ['Pending', 'Scheduled'] }
+                }
+            }
+        })
+        .populate('hiringRequestId', 'requestId roleDetails')
+        .select('candidateName email mobile interviewRounds hiringRequestId');
+
+        // Extract and flatten the specific rounds assigned to the user
+        const scheduledInterviews = [];
+        
+        candidates.forEach(candidate => {
+            candidate.interviewRounds.forEach(round => {
+                // Check if this specific round is assigned to the requested user and is pending
+                const isAssigned = round.assignedTo.some(id => id.toString() === userId.toString());
+                if (isAssigned && ['Pending', 'Scheduled'].includes(round.status)) {
+                    scheduledInterviews.push({
+                        candidateId: candidate._id,
+                        candidateName: candidate.candidateName,
+                        candidateEmail: candidate.email,
+                        candidateMobile: candidate.mobile,
+                        role: candidate.hiringRequestId?.roleDetails?.title || 'Unknown Role',
+                        hiringRequestId: candidate.hiringRequestId?._id,
+                        roundId: round._id,
+                        levelName: round.levelName,
+                        scheduledDate: round.scheduledDate,
+                        status: round.status
+                    });
+                }
+            });
+        });
+
+        // Sort by date (oldest/nearest first), pushing null dates to the end
+        scheduledInterviews.sort((a, b) => {
+            if (!a.scheduledDate) return 1;
+            if (!b.scheduledDate) return -1;
+            return new Date(a.scheduledDate) - new Date(b.scheduledDate);
+        });
+
+        res.status(200).json(scheduledInterviews);
+    } catch (error) {
+        console.error('Error fetching user interviews:', error);
+        res.status(500).json({ message: 'Server error fetching scheduled interviews', error: error.message });
     }
 };
 

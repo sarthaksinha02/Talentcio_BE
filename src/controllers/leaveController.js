@@ -138,6 +138,20 @@ const applyLeave = async (req, res) => {
             auditLog: [{ action: 'Applied', by: userId, comment: 'Initial Application' }]
         });
 
+        // Notify Managers
+        const currentUser = await User.findById(userId).populate('reportingManagers');
+        if (currentUser && currentUser.reportingManagers && currentUser.reportingManagers.length > 0) {
+            const Notification = require('../models/Notification');
+            const notifications = currentUser.reportingManagers.map(manager => ({
+                user: manager._id,
+                title: 'New Leave Request',
+                message: `${currentUser.firstName} ${currentUser.lastName} has applied for ${daysCount} days of ${leaveType} leave.`,
+                type: 'Approval',
+                link: '/admin/leaves/requests'
+            }));
+            await Notification.insertMany(notifications);
+        }
+
         res.status(201).json(leaveRequest);
 
     } catch (error) {
@@ -305,6 +319,17 @@ const updateLeaveStatus = async (req, res) => {
         });
 
         await request.save();
+        
+        // Notify Employee
+        const Notification = require('../models/Notification');
+        await Notification.create({
+            user: request.user,
+            title: `Leave Request ${status}`,
+            message: `Your leave request for ${request.daysCount} days of ${request.leaveType} has been ${status.toLowerCase()}.`,
+            type: status === 'Approved' ? 'Info' : 'Alert',
+            link: '/leaves'
+        });
+
         res.json(request);
 
     } catch (error) {

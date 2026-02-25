@@ -104,6 +104,17 @@ exports.createQuery = async (req, res) => {
 
         await newQuery.save();
 
+        if (qType.assignedPerson) {
+            const Notification = require('../models/Notification');
+            await Notification.create({
+                user: qType.assignedPerson,
+                title: 'New Helpdesk Query',
+                message: `You have been assigned a new ${priority || 'Medium'} priority query: "${subject}"`,
+                type: 'Alert',
+                link: '/helpdesk'
+            });
+        }
+
         res.status(201).json({
             success: true,
             data: newQuery
