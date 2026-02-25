@@ -154,7 +154,7 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
         // Verify if user has access to see all candidates vs only assigned ones
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
-        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+        const hasTaManage = userPermissions.includes('ta.hiring_request.manage') || userPermissions.includes('*');
 
         // Check if user is creator/HM/recruiter/approver of the hiring request
         const hiringRequest = await HiringRequest.findById(hiringRequestId);
@@ -162,14 +162,14 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
             hiringRequest.createdBy?._id?.toString() === req.user._id.toString() ||
             hiringRequest.ownership?.hiringManager?._id?.toString() === req.user._id.toString() ||
             hiringRequest.ownership?.recruiter?._id?.toString() === req.user._id.toString() ||
-            hiringRequest.approvalChain?.some(step => 
+            hiringRequest.approvalChain?.some(step =>
                 step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
             )
         );
 
         let query = { hiringRequestId };
 
-        if (!isAdmin && !hasTaView && !isRequestParticipant) {
+        if (!isAdmin && !hasTaManage && !isRequestParticipant) {
             // User is likely just an interviewer. Only show candidates they are assigned to.
             query['interviewRounds.assignedTo'] = req.user._id;
         }
@@ -209,25 +209,24 @@ exports.getCandidateById = async (req, res) => {
         // Verify if user has access to see this candidate
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
-        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+        const hasTaManage = userPermissions.includes('ta.hiring_request.manage') || userPermissions.includes('*');
 
         const hiringRequest = candidate.hiringRequestId; // populated object
-        
+
         const isRequestParticipant = hiringRequest && (
             hiringRequest.createdBy?._id?.toString() === req.user._id.toString() ||
             hiringRequest.ownership?.hiringManager?._id?.toString() === req.user._id.toString() ||
             hiringRequest.ownership?.recruiter?._id?.toString() === req.user._id.toString() ||
-            (candidate.hiringRequestId.approvalChain && candidate.hiringRequestId.approvalChain.some(step => 
+            (candidate.hiringRequestId.approvalChain && candidate.hiringRequestId.approvalChain.some(step =>
                 step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
             ))
         );
 
-        // Check if they are assigned to any round for this candidate
-        const isAssignedInterviewer = candidate.interviewRounds?.some(round => 
+        const isAssignedInterviewer = candidate.interviewRounds?.some(round =>
             round.assignedTo?.some(ass => ass._id?.toString() === req.user._id.toString() || ass.toString() === req.user._id.toString())
         );
 
-        if (!isAdmin && !hasTaView && !isRequestParticipant && !isAssignedInterviewer) {
+        if (!isAdmin && !hasTaManage && !isRequestParticipant && !isAssignedInterviewer) {
             return res.status(403).json({ message: 'Forbidden: You do not have permission to view this candidate' });
         }
 
@@ -274,10 +273,10 @@ exports.updateCandidate = async (req, res) => {
 
         // Update fields securely (prevent mass assignment)
         const allowedUpdates = [
-            'candidateName', 'email', 'mobile', 'source', 'referralName', 
-            'profilePulledBy', 'currentCTC', 'expectedCTC', 'preference', 
-            'totalExperience', 'qualification', 'currentCompany', 'pastExperience', 
-            'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod', 
+            'candidateName', 'email', 'mobile', 'source', 'referralName',
+            'profilePulledBy', 'currentCTC', 'expectedCTC', 'preference',
+            'totalExperience', 'qualification', 'currentCompany', 'pastExperience',
+            'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod',
             'status', 'remark', 'decision'
         ];
 
@@ -551,7 +550,7 @@ exports.deleteInterviewRound = async (req, res) => {
 exports.getMyScheduledInterviews = async (req, res) => {
     try {
         const userId = req.user._id;
-        
+
         // Find all candidates that have an interview round assigned to the current user
         // and its status is 'Scheduled' or 'Pending'
         const candidates = await Candidate.find({
@@ -562,12 +561,12 @@ exports.getMyScheduledInterviews = async (req, res) => {
                 }
             }
         })
-        .populate('hiringRequestId', 'requestId roleDetails')
-        .select('candidateName email mobile interviewRounds hiringRequestId');
+            .populate('hiringRequestId', 'requestId roleDetails')
+            .select('candidateName email mobile interviewRounds hiringRequestId');
 
         // Extract and flatten the specific rounds assigned to the user
         const scheduledInterviews = [];
-        
+
         candidates.forEach(candidate => {
             candidate.interviewRounds.forEach(round => {
                 // Check if this specific round is assigned to the requested user and is pending

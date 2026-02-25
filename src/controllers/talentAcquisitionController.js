@@ -62,7 +62,7 @@ exports.createHiringRequest = async (req, res) => {
             // Set status based on workflow type
             if (approvals.length > 0) {
                 newRequest.status = 'Pending_Approval'; // Dynamic workflow
-                
+
                 // Notify first level approvers
                 const currentStep = approvals[0];
                 if (currentStep && currentStep.approvers && currentStep.approvers.length > 0) {
@@ -106,23 +106,24 @@ exports.getHiringRequests = async (req, res) => {
         if (status) query.status = status;
 
         // Use permissions to filter what they see
-        // Admin/HR sees all. ta.view sees all. Manager sees own.
+        // Admin/HR/Manage sees all. Manager sees own.
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
-        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+        const hasTaManage = userPermissions.includes('ta.hiring_request.manage') || userPermissions.includes('*');
 
-        if (!isAdmin && !hasTaView) {
+        if (!isAdmin && !hasTaManage) {
             // Find HRRs where the user is assigned to a candidate's interview round (granular)
             const candidatesWithUserAsInterviewer = await Candidate.find({
                 'interviewRounds.assignedTo': req.user._id
             }).select('hiringRequestId');
-            
+
             const interviewHiringRequestIds = candidatesWithUserAsInterviewer.map(c => c.hiringRequestId);
 
             query['$or'] = [
                 { createdBy: req.user._id },
                 { 'ownership.hiringManager': req.user._id },
                 { 'ownership.recruiter': req.user._id },
+                { 'approvalChain.approvers': req.user._id }, // Approvers
                 { _id: { $in: interviewHiringRequestIds } } // Only HRRs where they have a specific candidate interview assignment
             ];
         }
@@ -169,12 +170,17 @@ exports.getHiringRequestById = async (req, res) => {
         // Authorization check
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
-        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
-        
-        if (!isAdmin && !hasTaView) {
+        const hasTaManage = userPermissions.includes('ta.hiring_request.manage') || userPermissions.includes('*');
+
+        if (!isAdmin && !hasTaManage) {
             const isCreator = request.createdBy?._id?.toString() === req.user._id.toString();
             const isHiringManager = request.ownership?.hiringManager?._id?.toString() === req.user._id.toString();
             const isRecruiter = request.ownership?.recruiter?._id?.toString() === req.user._id.toString();
+
+            // Approver check
+            const isApprover = request.approvalChain?.some(step =>
+                step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
+            );
 
             // Check if user is an assigned interviewer for any candidate in this request (granular check)
             const isInterviewer = await Candidate.exists({
@@ -182,7 +188,7 @@ exports.getHiringRequestById = async (req, res) => {
                 'interviewRounds.assignedTo': req.user._id
             });
 
-            if (!isCreator && !isHiringManager && !isRecruiter && !isInterviewer) {
+            if (!isCreator && !isHiringManager && !isRecruiter && !isApprover && !isInterviewer) {
                 return res.status(403).json({ message: 'Forbidden: You do not have permission to view this request' });
             }
         }
@@ -209,10 +215,10 @@ exports.updateHiringRequest = async (req, res) => {
 
         // Apply updates to request securely (prevent mass assignment)
         const allowedUpdates = [
-            'client', 'roleDetails', 'purpose', 'requirements', 
+            'client', 'roleDetails', 'purpose', 'requirements',
             'hiringDetails', 'replacementDetails', 'ownership', 'interviewWorkflowId'
         ];
-        
+
         allowedUpdates.forEach(field => {
             if (updates[field] !== undefined) {
                 request[field] = updates[field];
@@ -402,7 +408,7 @@ exports.approveHiringRequest = async (req, res) => {
                 }
                 request.approvals.final = { status: 'Approved', approver: req.user._id, date: new Date(), comments };
                 request.status = 'Approved';
-                
+
                 // Notify creator
                 if (request.createdBy) {
                     const Notification = require('../models/Notification');
