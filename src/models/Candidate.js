@@ -115,6 +115,9 @@ const candidateSchema = new mongoose.Schema({
         type: Number,
         min: 0
     },
+    lastWorkingDay: {
+        type: Date
+    },
 
     // Status Tracking
     status: {
