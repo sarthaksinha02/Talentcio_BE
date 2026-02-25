@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const { HiringRequest } = require('../models/HiringRequest');
 const jwt = require('jsonwebtoken');
 
 // Generate JWT Helper
@@ -75,6 +76,16 @@ const loginUser = async (req, res) => {
             // Check if user has subordinates
             const directReportsCount = await User.countDocuments({ reportingManagers: user._id });
 
+            // Check TA Participation
+            const taCount = await HiringRequest.countDocuments({
+                $or: [
+                    { createdBy: user._id },
+                    { 'ownership.hiringManager': user._id },
+                    { 'ownership.recruiter': user._id },
+                    { 'approvalChain.approvers': user._id }
+                ]
+            });
+
             res.json({
                 _id: user._id,
                 firstName: user.firstName,
@@ -85,6 +96,7 @@ const loginUser = async (req, res) => {
                 roles: user.roles.map(r => r.name),
                 permissions: permissions,
                 directReportsCount: directReportsCount,
+                isTAParticipant: taCount > 0,
                 token: generateToken(user._id, user.tokenVersion)
             });
         } else {

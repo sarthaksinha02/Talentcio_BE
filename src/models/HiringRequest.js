@@ -61,6 +61,7 @@ const HiringRequestSchema = new mongoose.Schema({
 
     // 6. Approval Workflow & Status
     workflowId: { type: mongoose.Schema.Types.ObjectId, ref: 'ApprovalWorkflow' }, // Track selected workflow
+    interviewWorkflowId: { type: mongoose.Schema.Types.ObjectId, ref: 'InterviewWorkflow' }, // Default interview template
     status: {
         type: String,
         enum: ['Draft', 'Submitted', 'Pending_L1', 'Pending_Final', 'Approved', 'Rejected', 'On_Hold', 'Closed', 'Pending_Approval'],

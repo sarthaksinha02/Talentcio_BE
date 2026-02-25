@@ -54,6 +54,7 @@ require('./src/models/LeaveConfig');
 require('./src/models/LeaveBalance');
 require('./src/models/LeaveRequest');
 require('./src/models/Candidate');
+require('./src/models/InterviewWorkflow');
 
 // Services
 const syncPermissions = require('./src/services/permissionSync');
@@ -74,6 +75,7 @@ const candidateRoutes = require('./src/routes/candidateRoutes');
 const workflowRoutes = require('./src/routes/workflowRoutes');
 const meetingRoutes = require('./src/routes/meetingRoutes');
 const helpdeskRoutes = require('./src/routes/helpdeskRoutes');
+const interviewWorkflowRoutes = require('./src/routes/interviewWorkflowRoutes');
 
 // Database Connection & Init
 const initServer = async () => {
@@ -95,6 +97,7 @@ app.use('/api/leaves', leaveRoutes);
 app.use('/api/dossier', dossierRoutes);
 app.use('/api/ta', talentAcquisitionRoutes);
 app.use('/api/ta/candidates', candidateRoutes);
+app.use('/api/ta/interview-workflows', interviewWorkflowRoutes);
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/helpdesk', helpdeskRoutes);

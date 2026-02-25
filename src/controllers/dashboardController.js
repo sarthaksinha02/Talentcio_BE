@@ -36,7 +36,8 @@ const getDashboardStats = async (req, res) => {
         // 4. Daily Attendance List (All Employees)
         const allUsers = await User.find({
             isActive: true
-        }).select('firstName lastName employeeCode department');
+        }).select('firstName lastName employeeCode department employmentType roles')
+          .populate('roles', 'name');
 
         const todaysAttendance = await Attendance.find({
             date: { $gte: today, $lt: tomorrow }
@@ -57,11 +58,18 @@ const getDashboardStats = async (req, res) => {
                 clockOutLocation = record.clockOutLocation;
             }
 
+            // Get the first role name if it exists, otherwise use 'Employee'
+            let roleName = 'Employee';
+            if (user.roles && user.roles.length > 0) {
+                roleName = user.roles[0].name;
+            }
+
             return {
                 id: user._id,
                 user: {
                     name: `${user.firstName} ${user.lastName}`,
-                    role: user.department || 'Employee',
+                    role: roleName,
+                    employmentType: user.employmentType || 'Employee',
                     avatar: null
                 },
                 time: checkInTime,
@@ -76,13 +84,13 @@ const getDashboardStats = async (req, res) => {
         const allProjects = await Project.find({})
             .sort({ updatedAt: -1 })
             .limit(10)
-            .select('name isActive dueDate'); // status is not in schema, using isActive
+            .select('name isActive status dueDate');
 
         // Map projects to ensure safe structure
         const projectsFormatted = allProjects.map(p => ({
             _id: p._id,
             name: p.name,
-            status: p.isActive ? 'Active' : 'Inactive',
+            status: p.status || (p.isActive ? 'Active' : 'Inactive'),
             deadline: p.dueDate
         }));
 

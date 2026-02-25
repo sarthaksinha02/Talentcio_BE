@@ -12,7 +12,7 @@ const generateRequestId = async () => {
 // --- createHiringRequest ---
 exports.createHiringRequest = async (req, res) => {
     try {
-        const { client, roleDetails, purpose, requirements, hiringDetails, ownership, replacementDetails } = req.body;
+        const { client, roleDetails, purpose, requirements, hiringDetails, ownership, replacementDetails, interviewWorkflowId } = req.body;
         const submitNow = req.query.submit === 'true';
 
         // validations...
@@ -51,6 +51,7 @@ exports.createHiringRequest = async (req, res) => {
             },
             approvalChain: approvals,
             workflowId: workflow?._id, // Save the workflow ID
+            interviewWorkflowId: interviewWorkflowId || undefined,
             currentApprovalLevel: approvals.length > 0 ? 1 : 0,
             status: submitNow ? 'Submitted' : 'Draft',
             createdBy: req.user._id
@@ -89,11 +90,13 @@ exports.getHiringRequests = async (req, res) => {
 
         if (status) query.status = status;
 
-        // Use permissions to filter what they see?
-        // Admin/HR sees all. Manager sees own.
+        // Use permissions to filter what they see
+        // Admin/HR sees all. ta.view sees all. Manager sees own.
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
-        if (!isAdmin) {
+        if (!isAdmin && !hasTaView) {
             query['$or'] = [
                 { createdBy: req.user._id },
                 { 'ownership.hiringManager': req.user._id },
@@ -136,9 +139,29 @@ exports.getHiringRequestById = async (req, res) => {
                 select: 'firstName lastName email'
             })
             .populate('approvals.l1.approver', 'firstName lastName')
-            .populate('approvals.final.approver', 'firstName lastName');
+            .populate('approvals.final.approver', 'firstName lastName')
+            .populate('interviewWorkflowId', 'name description rounds');
 
         if (!request) return res.status(404).json({ message: 'Not found' });
+
+        // Authorization check
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+        
+        if (!isAdmin && !hasTaView) {
+            // Check if user is creator, hiring manager, recruiter, or in approval chain
+            const isCreator = request.createdBy?._id?.toString() === req.user._id.toString();
+            const isHiringManager = request.ownership?.hiringManager?._id?.toString() === req.user._id.toString();
+            const isRecruiter = request.ownership?.recruiter?._id?.toString() === req.user._id.toString();
+            const isApprover = request.approvalChain?.some(step => 
+                step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
+            );
+
+            if (!isCreator && !isHiringManager && !isRecruiter && !isApprover) {
+                return res.status(403).json({ message: 'Forbidden: You do not have permission to view this request' });
+            }
+        }
 
         res.status(200).json(request);
     } catch (error) {
@@ -160,8 +183,17 @@ exports.updateHiringRequest = async (req, res) => {
             return res.status(400).json({ message: 'Cannot edit a closed request' });
         }
 
-        // Apply updates to request
-        Object.assign(request, updates);
+        // Apply updates to request securely (prevent mass assignment)
+        const allowedUpdates = [
+            'client', 'roleDetails', 'purpose', 'requirements', 
+            'hiringDetails', 'replacementDetails', 'ownership', 'interviewWorkflowId'
+        ];
+        
+        allowedUpdates.forEach(field => {
+            if (updates[field] !== undefined) {
+                request[field] = updates[field];
+            }
+        });
 
         // Handle workflow changes or initialization
         let workflowChanged = false;
@@ -279,7 +311,10 @@ exports.approveHiringRequest = async (req, res) => {
                 return approverId === req.user._id.toString();
             });
 
-            if (!isAuthorized) {
+            const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+            const hasSuperApprove = userPermissions.includes('ta.super_approve') || userPermissions.includes('*');
+
+            if (!isAuthorized && !hasSuperApprove) {
                 return res.status(403).json({
                     message: 'You are not authorized to approve this level',
                     currentLevel: request.currentApprovalLevel,
@@ -365,7 +400,10 @@ exports.rejectHiringRequest = async (req, res) => {
                     return approverId === req.user._id.toString();
                 });
 
-                if (!isAuthorized) {
+                const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+                const hasSuperApprove = userPermissions.includes('ta.super_approve') || userPermissions.includes('*');
+
+                if (!isAuthorized && !hasSuperApprove) {
                     return res.status(403).json({
                         message: 'You are not authorized to reject this level',
                         currentLevel: request.currentApprovalLevel,

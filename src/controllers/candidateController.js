@@ -222,10 +222,18 @@ exports.updateCandidate = async (req, res) => {
             });
         }
 
-        // Update fields
-        Object.keys(updateData).forEach(key => {
-            if (key !== 'statusHistory' && key !== 'uploadedBy' && key !== 'uploadedAt') {
-                candidate[key] = updateData[key];
+        // Update fields securely (prevent mass assignment)
+        const allowedUpdates = [
+            'candidateName', 'email', 'mobile', 'source', 'referralName', 
+            'profilePulledBy', 'currentCTC', 'expectedCTC', 'preference', 
+            'totalExperience', 'qualification', 'currentCompany', 'pastExperience', 
+            'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod', 
+            'status', 'remark', 'decision'
+        ];
+
+        allowedUpdates.forEach(field => {
+            if (updateData[field] !== undefined) {
+                candidate[field] = updateData[field];
             }
         });
 
@@ -319,6 +327,39 @@ exports.updateCandidateStatus = async (req, res) => {
     }
 };
 
+// Update candidate decision
+exports.updateCandidateDecision = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { decision } = req.body;
+
+        if (!decision) {
+            return res.status(400).json({ message: 'Decision is required' });
+        }
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        candidate.decision = decision;
+        await candidate.save();
+
+        const updatedCandidate = await Candidate.findById(id)
+            .populate('uploadedBy', 'firstName lastName email')
+            .populate('hiringRequestId', 'requestId roleDetails');
+
+        res.status(200).json({
+            message: 'Decision updated successfully',
+            candidate: updatedCandidate
+        });
+
+    } catch (error) {
+        console.error('Error updating decision:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 // Get distinct candidate sources
 exports.getCandidateSources = async (req, res) => {
     try {
@@ -330,6 +371,165 @@ exports.getCandidateSources = async (req, res) => {
         res.status(200).json(allSources.sort());
     } catch (error) {
         console.error('Error fetching sources:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// --- INTERVIEW ROUNDS MANAGEMENT ---
+
+// Add a new interview round
+exports.addInterviewRound = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { levelName, assignedTo, scheduledDate } = req.body;
+
+        if (!levelName) {
+            return res.status(400).json({ message: 'Level name is required' });
+        }
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        const newRound = {
+            levelName,
+            assignedTo: assignedTo || [],
+            status: 'Pending',
+            scheduledDate
+        };
+
+        candidate.interviewRounds.push(newRound);
+        await candidate.save();
+
+        const updatedCandidate = await Candidate.findById(id)
+            .populate('interviewRounds.assignedTo', 'firstName lastName email')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+
+        res.status(201).json({
+            message: 'Interview round added successfully',
+            round: updatedCandidate.interviewRounds[updatedCandidate.interviewRounds.length - 1],
+            candidate: updatedCandidate
+        });
+    } catch (error) {
+        console.error('Error adding interview round:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Update an existing interview round (e.g., reschedule, change assignment)
+exports.updateInterviewRound = async (req, res) => {
+    try {
+        const { id, roundId } = req.params;
+        const { levelName, assignedTo, scheduledDate } = req.body;
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        const round = candidate.interviewRounds.id(roundId);
+        if (!round) {
+            return res.status(404).json({ message: 'Interview round not found' });
+        }
+
+        if (levelName) round.levelName = levelName;
+        if (assignedTo !== undefined) round.assignedTo = assignedTo;
+        if (scheduledDate !== undefined) round.scheduledDate = scheduledDate;
+
+        await candidate.save();
+
+        const updatedCandidate = await Candidate.findById(id)
+            .populate('interviewRounds.assignedTo', 'firstName lastName email')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+
+        res.status(200).json({
+            message: 'Interview round updated successfully',
+            round: updatedCandidate.interviewRounds.id(roundId),
+            candidate: updatedCandidate
+        });
+    } catch (error) {
+        console.error('Error updating interview round:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Delete an interview round
+exports.deleteInterviewRound = async (req, res) => {
+    try {
+        const { id, roundId } = req.params;
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        const round = candidate.interviewRounds.id(roundId);
+        if (!round) {
+            return res.status(404).json({ message: 'Interview round not found' });
+        }
+
+        candidate.interviewRounds.pull(roundId);
+        await candidate.save();
+
+        res.status(200).json({ message: 'Interview round deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting interview round:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Evaluate an interview round (Pass/Fail)
+exports.evaluateInterviewRound = async (req, res) => {
+    try {
+        const { id, roundId } = req.params;
+        const { status, feedback } = req.body; // status should be 'Passed' or 'Failed'
+
+        if (!['Passed', 'Failed'].includes(status)) {
+            return res.status(400).json({ message: 'Status must be Passed or Failed' });
+        }
+
+        if (!feedback) {
+            return res.status(400).json({ message: 'Feedback is required for evaluation' });
+        }
+
+        const candidate = await Candidate.findById(id).populate('interviewRounds.assignedTo');
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        const round = candidate.interviewRounds.id(roundId);
+        if (!round) {
+            return res.status(404).json({ message: 'Interview round not found' });
+        }
+
+        // Authorization check: User must be an assigned evaluator or have super approve
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasSuperApprove = userPermissions.includes('ta.super_approve') || userPermissions.includes('*');
+        const isAssigned = round.assignedTo.some(user => user._id.toString() === req.user._id.toString());
+
+        if (!isAssigned && !hasSuperApprove) {
+            return res.status(403).json({ message: 'Forbidden: You are not authorized to evaluate this round' });
+        }
+
+        round.status = status;
+        round.feedback = feedback;
+        round.evaluatedBy = req.user._id;
+        round.evaluatedAt = new Date();
+
+        await candidate.save();
+
+        const updatedCandidate = await Candidate.findById(id)
+            .populate('interviewRounds.assignedTo', 'firstName lastName email')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+
+        res.status(200).json({
+            message: `Round evaluated as ${status}`,
+            round: updatedCandidate.interviewRounds.id(roundId),
+            candidate: updatedCandidate
+        });
+    } catch (error) {
+        console.error('Error evaluating interview round:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };

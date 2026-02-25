@@ -221,5 +221,37 @@ module.exports = [
         key: "dossier.view",
         module: "DOSSIER",
         description: "View other employees' dossiers"
+    },
+
+    // TALENT ACQUISITION (TA)
+    {
+        key: "ta.view",
+        module: "TA",
+        description: "View all hiring requests and candidates globally"
+    },
+    {
+        key: "ta.create",
+        module: "TA",
+        description: "Create new hiring requests and candidates"
+    },
+    {
+        key: "ta.edit",
+        module: "TA",
+        description: "Edit hiring requests and candidates"
+    },
+    {
+        key: "ta.delete",
+        module: "TA",
+        description: "Delete hiring requests and candidates"
+    },
+    {
+        key: "ta.hiring_request.manage",
+        module: "TA",
+        description: "Approve, reject, or close hiring requests"
+    },
+    {
+        key: "ta.super_approve",
+        module: "TA",
+        description: "Force approve or reject any hiring request regardless of workflow assignment"
     }
 ];

@@ -139,6 +139,30 @@ const candidateSchema = new mongoose.Schema({
         remark: String
     }],
 
+    // Interview Tracking
+    interviewRounds: [{
+        levelName: { // e.g., '1', '2', 'L1 - Technical', 'HR Round'
+            type: String,
+            required: true
+        },
+        assignedTo: [{ // Users assigned to evaluate this round
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        }],
+        status: { // State of this specific round
+            type: String,
+            enum: ['Pending', 'Scheduled', 'Passed', 'Failed', 'Skipped'],
+            default: 'Pending'
+        },
+        scheduledDate: Date,
+        feedback: String,
+        evaluatedBy: { // User who actually submitted the pass/fail
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        evaluatedAt: Date
+    }],
+
     // Hiring Decision
     decision: {
         type: String,
@@ -157,16 +181,6 @@ const candidateSchema = new mongoose.Schema({
 // Compound index to ensure unique email per hiring request
 candidateSchema.index({ hiringRequestId: 1, email: 1 }, { unique: true });
 
-// Add status to history before saving
-candidateSchema.pre('save', function () {
-    if (this.isModified('status') && !this.isNew) {
-        this.statusHistory.push({
-            status: this.status,
-            changedBy: this.uploadedBy,
-            changedAt: new Date(),
-            remark: this.remark
-        });
-    }
-});
+
 
 module.exports = mongoose.model('Candidate', candidateSchema);

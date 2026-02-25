@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Role = require('../models/Role');
+const { HiringRequest } = require('../models/HiringRequest');
 
 // @desc    Get All Users
 // @route   GET /api/users
@@ -194,13 +195,24 @@ const getMyself = async (req, res) => {
         const subordinates = await User.find({ reportingManagers: req.user._id })
             .select('firstName lastName email role department');
 
+        // Check TA Participation
+        const taCount = await HiringRequest.countDocuments({
+            $or: [
+                { createdBy: req.user._id },
+                { 'ownership.hiringManager': req.user._id },
+                { 'ownership.recruiter': req.user._id },
+                { 'approvalChain.approvers': req.user._id }
+            ]
+        });
+
         res.json({
             ...user.toObject(),
             roles: user.roles,                    // Full objects so Profile.jsx can read r.name
             roleNames: user.roles.map(r => r.name), // Flat names array for AuthContext
             permissions,
             directReports: subordinates,
-            directReportsCount                    // Added: needed by Leaves.jsx hasApprovalAccess
+            directReportsCount,                   // Added: needed by Leaves.jsx hasApprovalAccess
+            isTAParticipant: taCount > 0
         });
     } catch (error) {
         console.error(error);
