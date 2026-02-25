@@ -116,6 +116,7 @@ exports.createCandidate = async (req, res) => {
             preferredLocation,
             tatToJoin,
             noticePeriod,
+            lastWorkingDay,
             status: status || 'Interested',
             remark,
             statusHistory: [{
@@ -278,7 +279,7 @@ exports.updateCandidate = async (req, res) => {
             'profilePulledBy', 'currentCTC', 'expectedCTC', 'preference',
             'totalExperience', 'qualification', 'currentCompany', 'pastExperience',
             'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod',
-            'status', 'remark', 'decision'
+            'status', 'remark', 'decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId'
         ];
 
         allowedUpdates.forEach(field => {
