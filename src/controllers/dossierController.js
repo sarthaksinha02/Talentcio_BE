@@ -934,13 +934,16 @@ exports.exportHRISExcel = async (req, res) => {
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('HRIS Data');
 
-        const query = {};
+        const query = {
+            'hris.status': { $in: ['Pending Approval', 'Approved', 'Submitted'] } // Fetch only submitted or approved profiles
+        };
+
         if (req.query.userId) {
             query.user = req.query.userId;
         }
 
         const profiles = await EmployeeProfile.find(query)
-            .sort({ 'hris.approvalDate': -1 })
+            .sort({ 'hris.submittedAt': -1, 'hris.approvalDate': -1 })
             .select('+identity.aadhaarNumber +identity.panNumber +identity.passportNumber +compensation.bankDetails.accountNumber +compensation.ctc')
             .populate('user', 'employeeCode firstName lastName email')
             .populate('employment.businessUnit', 'name');
@@ -989,7 +992,7 @@ exports.exportHRISExcel = async (req, res) => {
                 columns: [
                     { header: 'Account Holder Name', key: 'accHolder', width: 20 },
                     { header: 'Bank Name', key: 'bankName', width: 20 },
-                    { header: 'Branch Name', key: 'branchName', width: 15 },
+                    { header: 'Branch Address', key: 'branchAddress', width: 30 },
                     { header: 'Account Number', key: 'accNum', width: 20 },
                     { header: 'IFSC Code', key: 'ifsc', width: 15 },
                 ]
@@ -1177,7 +1180,7 @@ exports.exportHRISExcel = async (req, res) => {
                     // Bank
                     accHolder: isFirst ? (p.compensation?.bankDetails?.accountHolderName || p.personal?.fullName || `${p.user?.firstName} ${p.user?.lastName}`) : '',
                     bankName: isFirst ? p.compensation?.bankDetails?.bankName : '',
-                    branchName: '',
+                    branchAddress: isFirst ? p.compensation?.bankDetails?.branchAddress : '',
                     accNum: isFirst ? p.compensation?.bankDetails?.accountNumber : '',
                     ifsc: isFirst ? p.compensation?.bankDetails?.ifscCode : '',
 
@@ -1191,7 +1194,7 @@ exports.exportHRISExcel = async (req, res) => {
                     fatherOcc: isFirst ? p.family?.fatherOccupation : '',
                     motherName: isFirst ? p.family?.motherName : '',
                     motherOcc: isFirst ? p.family?.motherOccupation : '',
-                    famMarital: isFirst ? p.personal?.maritalStatus : '',
+                    famMarital: isFirst ? p.family?.parentsMaritalStatus : '',
                     totalSiblings: isFirst ? p.family?.totalSiblings : '',
                     spouseName: isFirst ? p.family?.spouseName : '',
                     spouseDob: isFirst ? formatDate(p.family?.spouseDob) : '',

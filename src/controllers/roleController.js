@@ -84,7 +84,7 @@ const getPermissions = async (req, res) => {
             if (curr.key.startsWith('business_unit.')) groupName = 'BUSINESS UNITS';
             else if (curr.key.startsWith('client.')) groupName = 'CLIENTS';
             else if (curr.key.startsWith('task.')) groupName = 'TASKS';
-            else if (curr.key.startsWith('project.')) groupName = 'PROJECTS';
+            else if (curr.key.startsWith('project.') || curr.key.startsWith('module.') || groupName === 'PROJECT') groupName = 'PROJECTS';
             else if (curr.key.startsWith('user.')) groupName = 'USER MANAGEMENT';
             else if (curr.key.startsWith('role.')) groupName = 'ROLE MANAGEMENT';
             else if (curr.key.startsWith('timesheet.')) groupName = 'TIMESHEETS';
