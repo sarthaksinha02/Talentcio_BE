@@ -77,6 +77,7 @@ exports.createCandidate = async (req, res) => {
             preferredLocation,
             tatToJoin,
             noticePeriod,
+            lastWorkingDay,
             status,
             remark
         } = req.body;
