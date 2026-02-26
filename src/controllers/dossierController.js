@@ -5,23 +5,27 @@ const { cloudinary } = require('../config/cloudinary');
 const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
 const axios = require('axios');
 
-// Helper to check permissions (Simplified for now, ideally strictly middleware)
-// But we need granular field filtering here
+// Helper to check permissions using the same role-based lookup as hasPermission()
 const filterProfileFields = (profile, viewer, isSelf) => {
     let profileObj = profile.toObject();
-    const permissions = (viewer && viewer.permissions) ? viewer.permissions : [];
-    // Safe check for roles array
     const roles = (viewer && Array.isArray(viewer.roles)) ? viewer.roles : [];
     const isAdmin = roles.some(r => r && (r.name === 'Admin' || r.name === 'Super Admin'));
 
-    const canViewSensitive = isAdmin || permissions.includes('dossier.view.sensitive');
+    // Check permissions from roles (same approach as hasPermission helper below)
+    const viewerHasPermission = (key) => {
+        if (isAdmin) return true;
+        return roles.some(role =>
+            role.permissions && role.permissions.some(p => p.key === key)
+        );
+    };
 
-    if (!canViewSensitive && !isSelf) {
-        // Redact sensitive info
+    const canViewDossier = isAdmin || viewerHasPermission('dossier.view') || viewerHasPermission('dossier.view.sensitive');
+
+    if (!canViewDossier && !isSelf) {
+        // Redact sensitive info for users without explicit dossier view permission
         delete profileObj.compensation;
         delete profileObj.identity;
-        delete profileObj.family; // New family section is sensitive
-        // Filter documents to remove sensitive ones if needed
+        delete profileObj.family;
     }
 
     return profileObj;
@@ -186,16 +190,16 @@ exports.submitHRIS = async (req, res) => {
         if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
         // Map updates to sections
-        if (updates.personal) profile.personal = { ...profile.personal.toObject(), ...updates.personal };
-        if (updates.identity) profile.identity = { ...profile.identity.toObject(), ...updates.identity };
-        if (updates.contact) profile.contact = { ...profile.contact.toObject(), ...updates.contact };
-        if (updates.family) profile.family = { ...profile.family.toObject(), ...updates.family };
-        if (updates.employment) profile.employment = { ...profile.employment.toObject(), ...updates.employment };
+        if (updates.personal) profile.personal = { ...(profile.personal?.toObject?.() || {}), ...updates.personal };
+        if (updates.identity) profile.identity = { ...(profile.identity?.toObject?.() || {}), ...updates.identity };
+        if (updates.contact) profile.contact = { ...(profile.contact?.toObject?.() || {}), ...updates.contact };
+        if (updates.family) profile.family = { ...(profile.family?.toObject?.() || {}), ...updates.family };
+        if (updates.employment) profile.employment = { ...(profile.employment?.toObject?.() || {}), ...updates.employment };
         if (updates.compensation) {
             profile.compensation = {
-                ...profile.compensation.toObject(),
+                ...(profile.compensation?.toObject?.() || {}),
                 ...updates.compensation,
-                bankDetails: { ...profile.compensation.bankDetails, ...updates.compensation.bankDetails }
+                bankDetails: { ...(profile.compensation?.bankDetails || {}), ...(updates.compensation?.bankDetails || {}) }
             };
         }
         if (updates.education) profile.education = updates.education;
@@ -267,8 +271,7 @@ exports.updateSection = async (req, res) => {
 
         // Update Logic
         if (!profile[section]) {
-            // Initialize if missing (rare case due to default schema)
-            // profile[section] = {}; 
+            profile[section] = {};
         }
 
         // Apply updates intelligently
@@ -287,7 +290,7 @@ exports.updateSection = async (req, res) => {
         });
 
         // Reset HRIS declaration if user is not Admin
-        if (!isAdmin && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
+        if (!isAdmin && profile.hris && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
             profile.hris.isDeclared = false;
             profile.hris.status = 'Draft';
         }
@@ -313,12 +316,10 @@ exports.updateSection = async (req, res) => {
 
 exports.addDocument = async (req, res) => {
     try {
-        console.log('addDocument called for user:', req.params.userId);
         const { userId } = req.params;
         const { category, title, expiryDate } = req.body;
 
-        console.log('Req body:', req.body);
-        console.log('Req file:', req.file);
+
 
         const fileUrl = req.file ? req.file.path : req.body.url;
 
@@ -341,7 +342,6 @@ exports.addDocument = async (req, res) => {
             return res.status(404).json({ message: 'Profile not found' });
         }
 
-        console.log('Pushing document to profile');
         profile.documents.push({
             category,
             title,
@@ -353,15 +353,12 @@ exports.addDocument = async (req, res) => {
         });
 
         // Reset HRIS declaration if user is not Admin
-        if (!isAdmin && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
+        if (!isAdmin && profile.hris && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
             profile.hris.isDeclared = false;
             profile.hris.status = 'Draft';
         }
 
         await profile.save();
-        console.log('Profile saved');
-
-        console.log('Creating AuditLog');
         await AuditLog.create({
             action: 'UPLOAD_DOCUMENT',
             module: 'EmployeeDossier',
@@ -369,7 +366,6 @@ exports.addDocument = async (req, res) => {
             details: { targetUser: userId, docTitle: title },
             ipAddress: req.ip
         });
-        console.log('AuditLog created');
 
         res.status(201).json(profile.documents);
 
@@ -424,7 +420,7 @@ exports.deleteDocument = async (req, res) => {
         profile.documents.pull(docId);
 
         // Reset HRIS declaration if user is not Admin
-        if (!isAdmin && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
+        if (!isAdmin && profile.hris && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
             profile.hris.isDeclared = false;
             profile.hris.status = 'Draft';
         }
@@ -697,17 +693,17 @@ exports.proxyPdf = async (req, res) => {
         for (const candidate of candidates) {
             if (!candidate) continue;
             try {
-                const res = await attemptFetch(candidate);
+                const fetchRes = await attemptFetch(candidate);
 
                 // Check if content length is valid (> 0)
-                const len = res.headers['content-length'];
+                const len = fetchRes.headers['content-length'];
                 if (len && parseInt(len) === 0) {
                     throw new Error('Empty response body');
                 }
 
 
-                if (res.status < 400) {
-                    finalResponse = res;
+                if (fetchRes.status < 400) {
+                    finalResponse = fetchRes;
                     break;
                 }
             } catch (err) {
@@ -759,53 +755,7 @@ exports.getDossierHistory = async (req, res) => {
 
 // @desc    Get all pending HRIS requests
 // @route   GET /api/dossier/requests
-// @access  Private (Admin or Manager)
-exports.getHRISRequests = async (req, res) => {
-    try {
-        const canApprove = hasPermission(req.user, 'dossier.approve');
-        const isAdmin = checkIsAdmin(req.user);
-
-        if (!canApprove && !isAdmin) {
-            // If strict mode, maybe return 403? 
-            // But for now, let's return empty or just their reports IF they are managers?
-            // User said: "when i dont give permission still user can approve [subordinates]" -> implies they DON'T want this.
-            // So if no permission, they see NOTHING.
-            return res.status(200).json([]);
-        }
-
-        let query = { 'hris.status': { $in: ['Pending Approval', 'Approved', 'Rejected'] } };
-
-        // If they have permission (e.g. HR Executive) but NOT Admin, maybe they should see specific BU? 
-        // For now, assume 'dossier.approve' grants view access to all requests (HR/Manager level).
-        // If we wanted to keep Manager logic BUT require permission:
-        // if (!isAdmin) query['employment.reportingManager'] = req.user._id; 
-        // But user implies removing "implicit" manager rights. 
-        // Let's stick to: If you have permission, you see requests.
-
-        // However, standard use case: Managers need to see requests.
-        // User wants: Manager needs 'dossier.approve' PERMISSION to do so.
-        // So: If (hasPermission), show all? Or show Reports?
-        // Usually 'dossier.approve' is global for HR.
-        // Let's assume 'dossier.approve' means "Can Approve HRIS" globally or for assigned scope.
-        // Since we don't have scope yet, we'll show ALL for now, OR valid filters.
-
-        // WAIT: If I show ALL, a manager sees other managers' teams. 
-        // Perhaps: 
-        // If Admin: All.
-        // If dossier.approve: All (HR role).
-        // If Manager WITH dossier.approve: All? Or just theirs?
-        // The prompt is vague on scope, but specific on "Permission Required".
-
-        // Safe bet: Admin sees all. Permission holder sees all. 
-        // (If strict manager scope is needed, we'd need 'dossier.approve.team' vs 'dossier.approve.all')
-
-    } catch (error) {
-        console.error('Get HRIS Requests Error:', error);
-        res.status(500).json({ message: 'Server Error', error: error.message });
-    }
-};
-
-// Re-implementing correctly below because the above block was comment-heavy logic
+// @access  Private (Admin or Manager with dossier.approve permission)
 exports.getHRISRequests = async (req, res) => {
     try {
         const canApprove = hasPermission(req.user, 'dossier.approve');
@@ -935,7 +885,7 @@ exports.exportHRISExcel = async (req, res) => {
         const sheet = workbook.addWorksheet('HRIS Data');
 
         const query = {
-            'hris.status': { $in: ['Pending Approval', 'Approved', 'Submitted'] } // Fetch only submitted or approved profiles
+            'hris.status': { $in: ['Pending Approval', 'Approved'] } // Fetch only submitted or approved profiles
         };
 
         if (req.query.userId) {
@@ -1012,7 +962,7 @@ exports.exportHRISExcel = async (req, res) => {
                     { header: 'father occupation', key: 'fatherOcc', width: 20 },
                     { header: 'mother name', key: 'motherName', width: 20 },
                     { header: 'mother occupation', key: 'motherOcc', width: 20 },
-                    { header: 'marital status', key: 'famMarital', width: 15 },
+                    { header: 'parents marital status', key: 'famMarital', width: 15 },
                     { header: 'total sibling', key: 'totalSiblings', width: 10 },
                     { header: 'spouse name', key: 'spouseName', width: 20 },
                     { header: 'spouse DOB', key: 'spouseDob', width: 12 },
@@ -1155,7 +1105,7 @@ exports.exportHRISExcel = async (req, res) => {
                     empCode: isFirst ? p.user?.employeeCode : '',
                     fullName: isFirst ? (p.personal?.fullName || `${p.user?.firstName} ${p.user?.lastName}`.trim()) : '',
                     firstName: isFirst ? p.user?.firstName : '',
-                    middleName: '',
+                    middleName: isFirst ? p.personal?.middleName : '',
                     lastName: isFirst ? p.user?.lastName : '',
                     gender: isFirst ? p.personal?.gender : '',
                     dob: isFirst ? formatDate(p.personal?.dob) : '',
