@@ -189,6 +189,20 @@ const getMyself = async (req, res) => {
             user.roles.flatMap(role => (role.permissions || []).filter(p => p).map(p => p.key))
         )];
 
+        let hasAllPermissions = false;
+        const Permission = require('../models/Permission');
+        if (permissions.includes('*')) {
+            hasAllPermissions = true;
+            const allPermissions = await Permission.find({});
+            const allKeys = allPermissions.map(p => p.key);
+            permissions = [...new Set([...permissions, ...allKeys])];
+        } else {
+            const totalPerms = await Permission.countDocuments({ key: { $ne: '*' } });
+            if (totalPerms > 0 && permissions.length >= totalPerms) {
+                hasAllPermissions = true;
+            }
+        }
+
         // Count subordinates — used by frontend for approval tab visibility
         const directReportsCount = await User.countDocuments({ reportingManagers: req.user._id });
 
@@ -220,6 +234,7 @@ const getMyself = async (req, res) => {
             roles: user.roles,                    // Full objects so Profile.jsx can read r.name
             roleNames: user.roles.map(r => r.name), // Flat names array for AuthContext
             permissions,
+            hasAllPermissions,
             directReports: subordinates,
             directReportsCount,                   // Added: needed by Leaves.jsx hasApprovalAccess
             isTAParticipant: taCount > 0 || isInterviewer

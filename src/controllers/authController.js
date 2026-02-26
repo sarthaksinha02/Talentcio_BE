@@ -65,13 +65,21 @@ const loginUser = async (req, res) => {
             )];
 
             // Wildcard Expansion: If user has '*', provide ALL permissions
+            let hasAllPermissions = false;
+            const Permission = require('../models/Permission');
             if (permissions.includes('*')) {
-                const Permission = require('../models/Permission');
+                hasAllPermissions = true;
                 const allPermissions = await Permission.find({});
 
                 // Add all permission keys
                 const allKeys = allPermissions.map(p => p.key);
                 permissions = [...new Set([...permissions, ...allKeys])];
+            } else {
+                const totalPerms = await Permission.countDocuments({ key: { $ne: '*' } });
+                // We use >= because sometimes legacy users might have duplicates, but generally == is fine
+                if (totalPerms > 0 && permissions.length >= totalPerms) {
+                    hasAllPermissions = true;
+                }
             }
 
             // Check if user has subordinates
@@ -104,6 +112,7 @@ const loginUser = async (req, res) => {
                 reportingManagers: user.reportingManagers,
                 roles: user.roles.map(r => r.name),
                 permissions: permissions,
+                hasAllPermissions: hasAllPermissions,
                 directReportsCount: directReportsCount,
                 isTAParticipant: taCount > 0 || isInterviewer,
                 token: generateToken(user._id, user.tokenVersion)
