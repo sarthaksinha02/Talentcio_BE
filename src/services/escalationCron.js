@@ -5,7 +5,7 @@ const User = require('../models/User');
 const startEscalationCron = () => {
     // Run every hour
     cron.schedule('0 * * * *', async () => {
-        console.log('[CRON] Running Helpdesk Escalation check...');
+        // console.log('[CRON] Running Helpdesk Escalation check...');
         try {
             const pendingQueries = await HelpdeskQuery.find({
                 status: { $in: ['New', 'In Progress'] }
@@ -49,7 +49,7 @@ const startEscalationCron = () => {
                 }
             }
 
-            console.log('[CRON] Helpdesk Escalation check completed.');
+            // console.log('[CRON] Helpdesk Escalation check completed.');
         } catch (error) {
             console.error('[CRON] Error during escalation check:', error);
         }
