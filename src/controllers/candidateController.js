@@ -605,6 +605,37 @@ exports.getMyScheduledInterviews = async (req, res) => {
     }
 };
 
+// Get all candidates pulled by a specific user for the User TA Dashboard
+exports.getCandidatesByPulledBy = async (req, res) => {
+    try {
+        const { userName } = req.params;
+
+        // Optionally, check if the current user has access to view this.
+        // For now, if they can reach this route (requires 'ta.view' or implicit access), allow it.
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+
+        // We assume userName is the literal string stored in `profilePulledBy`
+        // Mongoose query
+        const query = { profilePulledBy: userName };
+
+        const candidates = await Candidate.find(query)
+            .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('uploadedBy', 'firstName lastName email')
+            .sort({ uploadedAt: -1 });
+
+        res.status(200).json({
+            count: candidates.length,
+            candidates
+        });
+
+    } catch (error) {
+        console.error('Error fetching candidates by pulled by:', error);
+        res.status(500).json({ message: 'Server error fetching candidates', error: error.message });
+    }
+};
+
 // Evaluate an interview round (Pass/Fail) or edit feedback for an already-evaluated round
 exports.evaluateInterviewRound = async (req, res) => {
     try {

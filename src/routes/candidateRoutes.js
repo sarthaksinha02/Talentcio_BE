@@ -11,6 +11,7 @@ const { upload } = require('../config/cloudinary');
 router.post('/upload-resume/:hiringRequestId', protect, authorize('ta.create'), upload.single('resume'), candidateController.uploadResume);
 
 // Get discrete sources
+router.get('/user/:userName', protect, authorize('ta.view'), candidateController.getCandidatesByPulledBy);
 router.get('/sources', protect, authorize('ta.view'), candidateController.getCandidateSources);
 
 // CRUD operations

@@ -10,7 +10,10 @@ const getUsers = async (req, res) => {
     try {
         const users = await User.find({})
             .select('-password -company')
-            .populate('roles', 'name')
+            .populate({
+                path: 'roles',
+                populate: { path: 'permissions', select: 'key' }
+            })
             .populate('reportingManagers', 'firstName lastName email')
             .populate('employeeProfile', 'hris');
         res.json(users);
