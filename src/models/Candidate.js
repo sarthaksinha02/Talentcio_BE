@@ -159,6 +159,11 @@ const candidateSchema = new mongoose.Schema({
         },
         scheduledDate: Date,
         feedback: String,
+        rating: { // Numeric rating out of 10 (only for Passed rounds)
+            type: Number,
+            min: 1,
+            max: 10
+        },
         evaluatedBy: { // User who actually submitted the pass/fail
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User'

@@ -605,11 +605,11 @@ exports.getMyScheduledInterviews = async (req, res) => {
     }
 };
 
-// Evaluate an interview round (Pass/Fail)
+// Evaluate an interview round (Pass/Fail) or edit feedback for an already-evaluated round
 exports.evaluateInterviewRound = async (req, res) => {
     try {
         const { id, roundId } = req.params;
-        const { status, feedback } = req.body; // status should be 'Passed' or 'Failed'
+        const { status, feedback, rating } = req.body; // status: 'Passed' or 'Failed'; rating: 1-10 (for Passed)
 
         if (!['Passed', 'Failed'].includes(status)) {
             return res.status(400).json({ message: 'Status must be Passed or Failed' });
@@ -642,6 +642,16 @@ exports.evaluateInterviewRound = async (req, res) => {
         round.feedback = feedback;
         round.evaluatedBy = req.user._id;
         round.evaluatedAt = new Date();
+
+        // Save rating only when the round is Passed
+        if (status === 'Passed' && rating !== undefined && rating !== null && rating !== '') {
+            const parsedRating = parseInt(rating, 10);
+            if (parsedRating >= 1 && parsedRating <= 10) {
+                round.rating = parsedRating;
+            }
+        } else if (status === 'Failed') {
+            round.rating = undefined; // Clear rating if changed to Failed
+        }
 
         await candidate.save();
 
