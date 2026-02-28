@@ -180,10 +180,11 @@ const getMyTeam = async (req, res) => {
 const getMyself = async (req, res) => {
     try {
         const user = await User.findById(req.user._id)
-            .select('-password -company')
+            .select('-password -company -tokenVersion -dossierStatus -employeeProfile')
             .populate({
                 path: 'roles',
-                populate: { path: 'permissions' }
+                select: 'name',
+                populate: { path: 'permissions', select: 'key' }   // Only fetch the key, nothing else
             })
             .populate('reportingManagers', 'firstName lastName email');
 
@@ -233,13 +234,28 @@ const getMyself = async (req, res) => {
         }
 
         res.json({
-            ...user.toObject(),
-            roles: user.roles,                    // Full objects so Profile.jsx can read r.name
-            roleNames: user.roles.map(r => r.name), // Flat names array for AuthContext
+            // Core identity
+            _id: user._id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            profilePicture: user.profilePicture,
+            employeeCode: user.employeeCode,
+            department: user.department,
+            workLocation: user.workLocation,
+            employmentType: user.employmentType,
+            joiningDate: user.joiningDate,
+            isActive: user.isActive,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+            reportingManagers: user.reportingManagers,
+            // Auth & access control
+            roles: user.roles.map(r => r.name),   // Just names — Profile.jsx uses r directly but it's a string now
+            roleNames: user.roles.map(r => r.name),
             permissions,
             hasAllPermissions,
             directReports: subordinates,
-            directReportsCount,                   // Added: needed by Leaves.jsx hasApprovalAccess
+            directReportsCount,
             isTAParticipant: taCount > 0 || isInterviewer
         });
     } catch (error) {
