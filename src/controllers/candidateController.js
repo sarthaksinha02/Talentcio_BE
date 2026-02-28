@@ -179,7 +179,8 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
         const candidates = await Candidate.find(query)
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails')
-            .sort({ uploadedAt: -1 });
+            .sort({ uploadedAt: -1 })
+            .lean();
 
         res.status(200).json({
             count: candidates.length,
@@ -202,7 +203,8 @@ exports.getCandidateById = async (req, res) => {
             .populate('hiringRequestId', 'requestId roleDetails')
             .populate('statusHistory.changedBy', 'firstName lastName')
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
-            .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName')
+            .lean();
 
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
@@ -623,7 +625,8 @@ exports.getCandidatesByPulledBy = async (req, res) => {
         const candidates = await Candidate.find(query)
             .populate('hiringRequestId', 'requestId roleDetails')
             .populate('uploadedBy', 'firstName lastName email')
-            .sort({ uploadedAt: -1 });
+            .sort({ uploadedAt: -1 })
+            .lean();
 
         res.status(200).json({
             count: candidates.length,

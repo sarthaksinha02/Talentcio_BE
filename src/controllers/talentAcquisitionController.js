@@ -100,7 +100,7 @@ exports.createHiringRequest = async (req, res) => {
 // --- getHiringRequests ---
 exports.getHiringRequests = async (req, res) => {
     try {
-        const { status } = req.query;
+        const { status, page = 1, limit = 10 } = req.query;
         let query = {};
 
         if (status) query.status = status;
@@ -115,7 +115,7 @@ exports.getHiringRequests = async (req, res) => {
             // Find HRRs where the user is assigned to a candidate's interview round (granular)
             const candidatesWithUserAsInterviewer = await Candidate.find({
                 'interviewRounds.assignedTo': req.user._id
-            }).select('hiringRequestId');
+            }).select('hiringRequestId').lean();
 
             const interviewHiringRequestIds = candidatesWithUserAsInterviewer.map(c => c.hiringRequestId);
 
@@ -127,12 +127,27 @@ exports.getHiringRequests = async (req, res) => {
             ];
         }
 
+        const pageNumber = parseInt(page);
+        const limitNumber = parseInt(limit);
+        const skip = (pageNumber - 1) * limitNumber;
+
+        const totalRequests = await HiringRequest.countDocuments(query);
+        const totalPages = Math.ceil(totalRequests / limitNumber);
+
         const requests = await HiringRequest.find(query)
             .populate('ownership.hiringManager', 'firstName lastName')
             .populate('ownership.recruiter', 'firstName lastName')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limitNumber)
+            .lean();
 
-        res.status(200).json(requests);
+        res.status(200).json({
+            requests,
+            totalPages,
+            currentPage: pageNumber,
+            totalRequests
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error' });
@@ -162,7 +177,8 @@ exports.getHiringRequestById = async (req, res) => {
             })
             .populate('approvals.l1.approver', 'firstName lastName')
             .populate('approvals.final.approver', 'firstName lastName')
-            .populate('interviewWorkflowId', 'name description rounds');
+            .populate('interviewWorkflowId', 'name description rounds')
+            .lean();
 
         if (!request) return res.status(404).json({ message: 'Not found' });
 
@@ -530,5 +546,104 @@ exports.closeHiringRequest = async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+// --- Analytics ---
+exports.getClientAnalytics = async (req, res) => {
+    try {
+        let { clientName } = req.params;
+        if (!clientName) {
+            return res.status(400).json({ success: false, message: 'Client name is required' });
+        }
+
+        clientName = decodeURIComponent(clientName);
+
+        const hiringRequests = await HiringRequest.find({ client: clientName }).lean();
+
+        if (!hiringRequests || hiringRequests.length === 0) {
+           return res.status(200).json({
+               success: true,
+               data: {
+                   totalReqs: 0,
+                   activeReqs: 0,
+                   closedReqs: 0,
+                   totalOpenPositions: 0,
+                   pipeline: {
+                    'Sourced': 0,
+                    'Pre-Screened': 0,
+                    'In Interviews': 0,
+                    'Hired': 0,
+                    'Rejected': 0,
+                    'On Hold': 0
+                   },
+                   hiringRatio: 0
+               }
+           });
+        }
+
+        const hrIds = hiringRequests.map(hr => hr._id);
+
+        let activeReqs = 0;
+        let closedReqs = 0;
+        let totalOpenPositions = 0;
+
+        hiringRequests.forEach(hr => {
+            if (hr.status === 'Closed') {
+                closedReqs++;
+            } else {
+                activeReqs++;
+                totalOpenPositions += (hr.hiringDetails?.openPositions || 1);
+            }
+        });
+
+        // Track candidate pipeline
+        const candidates = await Candidate.find({ hiringRequestId: { $in: hrIds } }).lean();
+        
+        const pipelineStages = {
+            'Sourced': 0,
+            'Pre-Screened': 0,
+            'In Interviews': 0,
+            'Hired': 0,
+            'Rejected': 0,
+            'On Hold': 0
+        };
+
+        let totalHired = 0;
+
+        candidates.forEach(c => {
+            const isHired = c.decision === 'Hired';
+            const isRejected = c.decision === 'Rejected';
+            const isOnHold = c.decision === 'On Hold';
+            const inInterviews = !isHired && !isRejected && !isOnHold && c.interviewRounds?.length > 0;
+           
+            if (isHired) { 
+                pipelineStages['Hired']++; 
+                totalHired++; 
+            }
+            else if (isRejected) pipelineStages['Rejected']++;
+            else if (isOnHold) pipelineStages['On Hold']++;
+            else if (inInterviews) pipelineStages['In Interviews']++;
+            else if (c.status === 'Pre-Screened') pipelineStages['Pre-Screened']++;
+            else pipelineStages['Sourced']++;
+        });
+
+        const hiringRatio = candidates.length > 0 ? ((totalHired / candidates.length) * 100).toFixed(1) : 0;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                totalReqs: hiringRequests.length,
+                activeReqs,
+                closedReqs,
+                totalOpenPositions,
+                pipeline: pipelineStages,
+                hiringRatio: Number(hiringRatio)
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching client analytics:', error);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
     }
 };

@@ -14,4 +14,7 @@ router.patch('/hiring-request/:id/approve', protect, authorize(['ta.hiring_reque
 router.patch('/hiring-request/:id/reject', protect, authorize(['ta.hiring_request.manage', 'ta.super_approve']), taController.rejectHiringRequest);
 router.patch('/hiring-request/:id/close', protect, authorize('ta.hiring_request.manage'), taController.closeHiringRequest);
 
+// Client Specific Analytics
+router.get('/analytics/client/:clientName', protect, taController.getClientAnalytics);
+
 module.exports = router;

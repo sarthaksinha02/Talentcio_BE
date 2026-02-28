@@ -276,19 +276,19 @@ const debugTA = async (req, res) => {
                 { 'ownership.hiringManager': req.user._id },
                 { 'ownership.recruiter': req.user._id }
             ]
-        }).select('requestId createdBy ownership.hiringManager ownership.recruiter');
+        }).select('requestId createdBy ownership.hiringManager ownership.recruiter').lean();
 
         const panelHRRs = await HiringRequest.find({
             'ownership.interviewPanel': req.user._id
-        }).select('requestId');
+        }).select('requestId').lean();
 
         const assignedCandidates = await Candidate.find({
             'interviewRounds.assignedTo': req.user._id
-        }).select('candidateName hiringRequestId');
+        }).select('candidateName hiringRequestId').lean();
 
         const approverHRRs = await HiringRequest.find({
             'approvalChain.approvers': req.user._id
-        }).select('requestId');
+        }).select('requestId').lean();
 
         res.json({
             userId: req.user._id,
