@@ -23,4 +23,7 @@ const holidaySchema = new mongoose.Schema({
 // Ensure unique holiday name per year
 holidaySchema.index({ name: 1, year: 1 }, { unique: true });
 
+// For month-based filtering
+holidaySchema.index({ date: 1 });
+
 module.exports = mongoose.model('Holiday', holidaySchema);
