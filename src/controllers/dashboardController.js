@@ -12,57 +12,37 @@ const getDashboardStats = async (req, res) => {
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
 
-        // 1. Total Employees
-        const totalEmployees = await User.countDocuments({
-            isActive: true
-        });
+        // Run all independent DB queries in parallel
+        const [
+            totalEmployees,
+            presentToday,
+            pendingRequests,
+            allUsers,
+            todaysAttendance,
+            allProjects
+        ] = await Promise.all([
+            User.countDocuments({ isActive: true }),
+            Attendance.countDocuments({
+                date: { $gte: today, $lt: tomorrow },
+                status: { $in: ['PRESENT', 'HALF_DAY'] }
+            }),
+            Attendance.countDocuments({ approvalStatus: 'PENDING' }),
+            User.find({ isActive: true })
+                .select('firstName lastName employeeCode department employmentType roles')
+                .populate('roles', 'name'),
+            Attendance.find({ date: { $gte: today, $lt: tomorrow } }),
+            Project.find({})
+                .sort({ updatedAt: -1 })
+                .limit(10)
+                .select('name isActive status dueDate')
+        ]);
 
-        // 2. Attendance Stats for Today
-        const presentToday = await Attendance.countDocuments({
-            date: { $gte: today, $lt: tomorrow },
-            status: { $in: ['PRESENT', 'HALF_DAY'] }
-        });
-
-        // Simple logic: If clocked in before 9:30 AM (Example), count as On Time
-        // For now, we'll just track "Present" vs "Total" to calculate "Absent"
         const absentToday = totalEmployees - presentToday;
 
-        // 3. Pending Approvals (Leaves/Attendance)
-        // Assuming we look for 'PENDING' status in Attendance (which handles requests)
-        const pendingRequests = await Attendance.countDocuments({
-            approvalStatus: 'PENDING'
-        });
-
-        // 4. Daily Attendance List (All Employees)
-        const allUsers = await User.find({
-            isActive: true
-        }).select('firstName lastName employeeCode department employmentType roles')
-          .populate('roles', 'name');
-
-        const todaysAttendance = await Attendance.find({
-            date: { $gte: today, $lt: tomorrow }
-        });
-
-        // Map users to status
+        // Map users to their today's attendance status
         const dailyStatusList = allUsers.map(user => {
             const record = todaysAttendance.find(a => a.user.toString() === user._id.toString());
-            let status = 'ABSENT';
-            let checkInTime = null;
-            let location = null;
-            let clockOutLocation = null;
-
-            if (record) {
-                status = record.status || 'PRESENT';
-                checkInTime = record.clockIn;
-                location = record.location;
-                clockOutLocation = record.clockOutLocation;
-            }
-
-            // Get the first role name if it exists, otherwise use 'Employee'
-            let roleName = 'Employee';
-            if (user.roles && user.roles.length > 0) {
-                roleName = user.roles[0].name;
-            }
+            const roleName = user.roles?.length > 0 ? user.roles[0].name : 'Employee';
 
             return {
                 id: user._id,
@@ -72,21 +52,15 @@ const getDashboardStats = async (req, res) => {
                     employmentType: user.employmentType || 'Employee',
                     avatar: null
                 },
-                time: checkInTime,
+                time: record ? record.clockIn : null,
                 clockOut: record ? record.clockOut : null,
-                status: status,
-                location: location,
-                clockOutLocation: clockOutLocation
+                status: record ? (record.status || 'PRESENT') : 'ABSENT',
+                location: record ? record.location : null,
+                clockOutLocation: record ? record.clockOutLocation : null
             };
         });
 
-        // 5. All Projects
-        const allProjects = await Project.find({})
-            .sort({ updatedAt: -1 })
-            .limit(10)
-            .select('name isActive status dueDate');
-
-        // Map projects to ensure safe structure
+        // Map projects to safe structure
         const projectsFormatted = allProjects.map(p => ({
             _id: p._id,
             name: p.name,
@@ -95,12 +69,7 @@ const getDashboardStats = async (req, res) => {
         }));
 
         res.json({
-            stats: {
-                totalEmployees,
-                presentToday,
-                absentToday,
-                pendingRequests
-            },
+            stats: { totalEmployees, presentToday, absentToday, pendingRequests },
             recentActivity: dailyStatusList,
             projects: projectsFormatted
         });
