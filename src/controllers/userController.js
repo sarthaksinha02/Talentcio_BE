@@ -195,33 +195,45 @@ const getMyself = async (req, res) => {
 
         let hasAllPermissions = false;
         const Permission = require('../models/Permission');
+        let totalPerms = 0, directReportsCount = 0, subordinates = [], taCount = 0;
+
         if (permissions.includes('*')) {
             hasAllPermissions = true;
             const allPermissions = await Permission.find({});
             const allKeys = allPermissions.map(p => p.key);
             permissions = [...new Set([...permissions, ...allKeys])];
+
+            // Because we don't need totalPerms, we just fetch the others concurrently
+            [directReportsCount, subordinates, taCount] = await Promise.all([
+                User.countDocuments({ reportingManagers: req.user._id }),
+                User.find({ reportingManagers: req.user._id }).select('firstName lastName email role department'),
+                HiringRequest.countDocuments({
+                    $or: [
+                        { createdBy: req.user._id },
+                        { 'ownership.hiringManager': req.user._id },
+                        { 'ownership.recruiter': req.user._id }
+                    ]
+                })
+            ]);
         } else {
-            const totalPerms = await Permission.countDocuments({ key: { $ne: '*' } });
+            // Fetch everything concurrently
+            [totalPerms, directReportsCount, subordinates, taCount] = await Promise.all([
+                Permission.countDocuments({ key: { $ne: '*' } }),
+                User.countDocuments({ reportingManagers: req.user._id }),
+                User.find({ reportingManagers: req.user._id }).select('firstName lastName email role department'),
+                HiringRequest.countDocuments({
+                    $or: [
+                        { createdBy: req.user._id },
+                        { 'ownership.hiringManager': req.user._id },
+                        { 'ownership.recruiter': req.user._id }
+                    ]
+                })
+            ]);
+
             if (totalPerms > 0 && permissions.length >= totalPerms) {
                 hasAllPermissions = true;
             }
         }
-
-        // Count subordinates — used by frontend for approval tab visibility
-        const directReportsCount = await User.countDocuments({ reportingManagers: req.user._id });
-
-        // Also fetch subordinate list (for Profile page)
-        const subordinates = await User.find({ reportingManagers: req.user._id })
-            .select('firstName lastName email role department');
-
-        // Check TA Participation (Creator, HM, Recruiter only — NOT approvers, as those are role-based workflow assignments)
-        const taCount = await HiringRequest.countDocuments({
-            $or: [
-                { createdBy: req.user._id },
-                { 'ownership.hiringManager': req.user._id },
-                { 'ownership.recruiter': req.user._id }
-            ]
-        });
 
         // Check if they are an interviewer via per-candidate round assignment (precise check)
         let isInterviewer = false;

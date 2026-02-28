@@ -223,7 +223,9 @@ const getTodayStatus = async (req, res) => {
                 $gte: today,
                 $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
             }
-        });
+        })
+            .select('user clockIn clockInIST clockOut clockOutIST status')
+            .lean();
 
         res.json(attendance || { status: 'Not Clocked In' });
     } catch (error) {

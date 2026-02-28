@@ -113,9 +113,11 @@ const deleteWorkLog = async (req, res) => {
 };
 
 // @desc    Get work logs for user (optional, for history)
-// @route   GET /api/projects/worklogs
+// @route   GET /api/projects/worklogs?limit=4
 const getWorkLogs = async (req, res) => {
     try {
+        const limit = parseInt(req.query.limit) || 0; // 0 means no limit in Mongoose
+
         const logs = await WorkLog.find({ user: req.user._id })
             .populate({
                 path: 'task',
@@ -124,7 +126,10 @@ const getWorkLogs = async (req, res) => {
                     populate: { path: 'project' }
                 }
             })
-            .sort({ date: -1 });
+            .sort({ date: -1 })
+            .limit(limit)
+            .lean();
+
         res.json(logs);
     } catch (error) {
         res.status(500).json({ message: 'Server Error' });

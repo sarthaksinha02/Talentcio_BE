@@ -67,6 +67,8 @@ const loginUser = async (req, res) => {
             // Wildcard Expansion: If user has '*', provide ALL permissions
             let hasAllPermissions = false;
             const Permission = require('../models/Permission');
+            let totalPerms = 0, directReportsCount = 0, taCount = 0;
+
             if (permissions.includes('*')) {
                 hasAllPermissions = true;
                 const allPermissions = await Permission.find({});
@@ -74,25 +76,36 @@ const loginUser = async (req, res) => {
                 // Add all permission keys
                 const allKeys = allPermissions.map(p => p.key);
                 permissions = [...new Set([...permissions, ...allKeys])];
+
+                // Run auth queries in parallel
+                [directReportsCount, taCount] = await Promise.all([
+                    User.countDocuments({ reportingManagers: user._id }),
+                    HiringRequest.countDocuments({
+                        $or: [
+                            { createdBy: user._id },
+                            { 'ownership.hiringManager': user._id },
+                            { 'ownership.recruiter': user._id }
+                        ]
+                    })
+                ]);
             } else {
-                const totalPerms = await Permission.countDocuments({ key: { $ne: '*' } });
-                // We use >= because sometimes legacy users might have duplicates, but generally == is fine
+                // Run auth queries in parallel
+                [totalPerms, directReportsCount, taCount] = await Promise.all([
+                    Permission.countDocuments({ key: { $ne: '*' } }),
+                    User.countDocuments({ reportingManagers: user._id }),
+                    HiringRequest.countDocuments({
+                        $or: [
+                            { createdBy: user._id },
+                            { 'ownership.hiringManager': user._id },
+                            { 'ownership.recruiter': user._id }
+                        ]
+                    })
+                ]);
+
                 if (totalPerms > 0 && permissions.length >= totalPerms) {
                     hasAllPermissions = true;
                 }
             }
-
-            // Check if user has subordinates
-            const directReportsCount = await User.countDocuments({ reportingManagers: user._id });
-
-            // Check TA Participation (Creator, HM, Recruiter only — NOT approvers, as those are role-based workflow assignments)
-            const taCount = await HiringRequest.countDocuments({
-                $or: [
-                    { createdBy: user._id },
-                    { 'ownership.hiringManager': user._id },
-                    { 'ownership.recruiter': user._id }
-                ]
-            });
 
             // Check if they are an interviewer via per-candidate round assignment (precise check)
             let isInterviewer = false;

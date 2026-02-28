@@ -1,14 +1,26 @@
 const Holiday = require('../models/Holiday');
 
-// @desc    Get all holidays
-// @route   GET /api/holidays
+// @desc    Get holidays (optionally filtered by month)
+// @route   GET /api/holidays?year=2026&month=2
 // @access  Private
 exports.getHolidays = async (req, res) => {
     try {
-        const year = req.query.year || new Date().getFullYear();
-        const holidays = await Holiday.find({
-            year: year
-        }).sort({ date: 1 });
+        const year = parseInt(req.query.year) || new Date().getFullYear();
+        const month = parseInt(req.query.month); // 1-12, optional
+
+        let filter = { year };
+
+        if (month >= 1 && month <= 12) {
+            // Filter to just the requested calendar month
+            const start = new Date(year, month - 1, 1);
+            const end = new Date(year, month, 1);   // exclusive
+            filter = { date: { $gte: start, $lt: end } };
+        }
+
+        const holidays = await Holiday.find(filter)
+            .select('name date isOptional')
+            .sort({ date: 1 })
+            .lean();
 
         res.json(holidays);
     } catch (err) {
