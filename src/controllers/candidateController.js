@@ -179,7 +179,8 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
         const candidates = await Candidate.find(query)
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails')
-            .sort({ uploadedAt: -1 });
+            .sort({ uploadedAt: -1 })
+            .lean();
 
         res.status(200).json({
             count: candidates.length,
@@ -202,7 +203,8 @@ exports.getCandidateById = async (req, res) => {
             .populate('hiringRequestId', 'requestId roleDetails')
             .populate('statusHistory.changedBy', 'firstName lastName')
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
-            .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName')
+            .lean();
 
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
@@ -602,6 +604,38 @@ exports.getMyScheduledInterviews = async (req, res) => {
     } catch (error) {
         console.error('Error fetching user interviews:', error);
         res.status(500).json({ message: 'Server error fetching scheduled interviews', error: error.message });
+    }
+};
+
+// Get all candidates pulled by a specific user for the User TA Dashboard
+exports.getCandidatesByPulledBy = async (req, res) => {
+    try {
+        const { userName } = req.params;
+
+        // Optionally, check if the current user has access to view this.
+        // For now, if they can reach this route (requires 'ta.view' or implicit access), allow it.
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+
+        // We assume userName is the literal string stored in `profilePulledBy`
+        // Mongoose query
+        const query = { profilePulledBy: userName };
+
+        const candidates = await Candidate.find(query)
+            .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('uploadedBy', 'firstName lastName email')
+            .sort({ uploadedAt: -1 })
+            .lean();
+
+        res.status(200).json({
+            count: candidates.length,
+            candidates
+        });
+
+    } catch (error) {
+        console.error('Error fetching candidates by pulled by:', error);
+        res.status(500).json({ message: 'Server error fetching candidates', error: error.message });
     }
 };
 
