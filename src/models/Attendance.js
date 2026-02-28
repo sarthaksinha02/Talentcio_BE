@@ -55,4 +55,16 @@ const attendanceSchema = new mongoose.Schema({
 // Ensure one entry per user per day
 attendanceSchema.index({ user: 1, date: 1 }, { unique: true });
 
+// Dashboard: "today's attendance" filter — Attendance.find({ date: { $gte, $lt } })
+attendanceSchema.index({ date: 1 });
+
+// Dashboard: present/absent count — Attendance.countDocuments({ date:..., status:... })
+attendanceSchema.index({ date: 1, status: 1 });
+
+// Dashboard: pending approvals — Attendance.countDocuments({ approvalStatus: 'PENDING' })
+attendanceSchema.index({ approvalStatus: 1 });
+
+// Attendance page: user's own history sorted by date
+attendanceSchema.index({ user: 1, date: -1 });
+
 module.exports = mongoose.model('Attendance', attendanceSchema);

@@ -28,13 +28,17 @@ const getDashboardStats = async (req, res) => {
             }),
             Attendance.countDocuments({ approvalStatus: 'PENDING' }),
             User.find({ isActive: true })
-                .select('firstName lastName employeeCode department employmentType roles')
-                .populate('roles', 'name'),
-            Attendance.find({ date: { $gte: today, $lt: tomorrow } }),
+                .select('firstName lastName employmentType roles')
+                .populate('roles', 'name')
+                .lean(),
+            Attendance.find({ date: { $gte: today, $lt: tomorrow } })
+                .select('user status clockIn clockOut location clockOutLocation')
+                .lean(),
             Project.find({})
                 .sort({ updatedAt: -1 })
                 .limit(10)
                 .select('name isActive status dueDate')
+                .lean()
         ]);
 
         const absentToday = totalEmployees - presentToday;
