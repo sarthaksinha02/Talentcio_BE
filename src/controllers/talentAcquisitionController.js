@@ -633,19 +633,19 @@ exports.getClientAnalytics = async (req, res) => {
         let totalHired = 0;
 
         candidates.forEach(c => {
-            // Count Rejected
+            // Count Rejected / On Hold first — these stop the funnel
             if (c.decision === 'Rejected' || c.phase2Decision === 'Rejected' || c.phase3Decision === 'No Show' || c.phase3Decision === 'Offer Declined') {
                 pipelineStages['Rejected / Drop-off']++;
-                return; // Stop counting further up funnel if rejected
+                return;
             }
-            
-            // Count On Hold
+
             if (c.decision === 'On Hold' || c.phase2Decision === 'On Hold') {
                 pipelineStages['On Hold']++;
                 return;
             }
 
-            // Phase 3 (Onboarding / Final Decision)
+            // Count cumulatively — a candidate in Phase 3 should also appear in Phase 2 counts
+            // Phase 3
             if (['Offer Sent', 'Offer Accepted', 'Joined'].includes(c.phase3Decision)) {
                 if (c.phase3Decision === 'Joined') {
                     pipelineStages['Joined']++;
@@ -653,13 +653,16 @@ exports.getClientAnalytics = async (req, res) => {
                 } else {
                     pipelineStages['Phase 3 Offer Stage']++;
                 }
+                // Also count in Phase 2 since they were selected
+                pipelineStages['Phase 2 Selected']++;
+                pipelineStages['Phase 2 Shortlisted']++;
                 return;
             }
 
-            // Phase 2 (Client Eval)
+            // Phase 2
             if (c.phase2Decision === 'Selected') {
                 pipelineStages['Phase 2 Selected']++;
-                pipelineStages['Phase 2 Shortlisted']++; // Included in Shortlisted metrics as well
+                pipelineStages['Phase 2 Shortlisted']++;
                 return;
             }
 
@@ -667,13 +670,13 @@ exports.getClientAnalytics = async (req, res) => {
                 pipelineStages['Phase 2 Shortlisted']++;
                 return;
             }
-            
+
             if (c.interviewRounds?.length > 0) {
-                 pipelineStages['Phase 2 In Interviews']++;
-                 return;
+                pipelineStages['Phase 2 In Interviews']++;
+                return;
             }
 
-            // Phase 1 (Internal)
+            // Phase 1
             if (c.decision === 'Shortlisted') {
                 pipelineStages['Phase 1 Shortlisted']++;
                 return;
@@ -683,7 +686,7 @@ exports.getClientAnalytics = async (req, res) => {
                 pipelineStages['Pre-Screened']++;
                 return;
             }
-            
+
             pipelineStages['Sourced']++;
         });
 
