@@ -621,7 +621,9 @@ exports.getClientAnalytics = async (req, res) => {
             'Sourced': 0,
             'Pre-Screened': 0,
             'Phase 1 Shortlisted': 0,
-            'Phase 2 Shortlisted / Interviews': 0,
+            'Phase 2 Shortlisted': 0,
+            'Phase 2 Selected': 0,
+            'Phase 2 In Interviews': 0,
             'Phase 3 Offer Stage': 0,
             'Joined': 0,
             'Rejected / Drop-off': 0,
@@ -655,13 +657,18 @@ exports.getClientAnalytics = async (req, res) => {
             }
 
             // Phase 2 (Client Eval)
-            if (['Shortlisted', 'Selected', 'Hired'].includes(c.phase2Decision)) {
-                pipelineStages['Phase 2 Shortlisted / Interviews']++;
+            if (c.phase2Decision === 'Selected') {
+                pipelineStages['Phase 2 Selected']++;
+                return;
+            }
+
+            if (c.phase2Decision === 'Shortlisted') {
+                pipelineStages['Phase 2 Shortlisted']++;
                 return;
             }
             
             if (c.interviewRounds?.length > 0) {
-                 pipelineStages['Phase 2 Shortlisted / Interviews']++;
+                 pipelineStages['Phase 2 In Interviews']++;
                  return;
             }
 
