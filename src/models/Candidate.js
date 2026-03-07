@@ -167,6 +167,10 @@ const candidateSchema = new mongoose.Schema({
             type: String,
             required: true
         },
+        phase: { // Tracks whether this round belongs to Phase 1 or Phase 2
+            type: Number,
+            default: 1
+        },
         assignedTo: [{ // Users assigned to evaluate this round
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User'

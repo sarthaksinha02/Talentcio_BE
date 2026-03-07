@@ -542,7 +542,7 @@ exports.getCandidateSources = async (req, res) => {
 exports.addInterviewRound = async (req, res) => {
     try {
         const { id } = req.params;
-        const { levelName, assignedTo, scheduledDate } = req.body;
+        const { levelName, assignedTo, scheduledDate, phase } = req.body;
 
         if (!levelName) {
             return res.status(400).json({ message: 'Level name is required' });
@@ -557,7 +557,8 @@ exports.addInterviewRound = async (req, res) => {
             levelName,
             assignedTo: assignedTo || [],
             status: 'Pending',
-            scheduledDate
+            scheduledDate,
+            phase: phase || 1
         };
 
         candidate.interviewRounds.push(newRound);
@@ -600,7 +601,7 @@ exports.addInterviewRound = async (req, res) => {
 exports.updateInterviewRound = async (req, res) => {
     try {
         const { id, roundId } = req.params;
-        const { levelName, assignedTo, scheduledDate } = req.body;
+        const { levelName, assignedTo, scheduledDate, phase } = req.body;
 
         const candidate = await Candidate.findById(id);
         if (!candidate) {
@@ -615,6 +616,7 @@ exports.updateInterviewRound = async (req, res) => {
         if (levelName) round.levelName = levelName;
         if (assignedTo !== undefined) round.assignedTo = assignedTo;
         if (scheduledDate !== undefined) round.scheduledDate = scheduledDate;
+        if (phase !== undefined) round.phase = phase;
 
         await candidate.save();
 
