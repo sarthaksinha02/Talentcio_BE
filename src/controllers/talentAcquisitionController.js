@@ -557,13 +557,25 @@ exports.closeHiringRequest = async (req, res) => {
 exports.getClientAnalytics = async (req, res) => {
     try {
         let { clientName } = req.params;
+        const { hiringRequestId } = req.query; // Optional filter
+
         if (!clientName) {
             return res.status(400).json({ success: false, message: 'Client name is required' });
         }
 
         clientName = decodeURIComponent(clientName);
 
-        const hiringRequests = await HiringRequest.find({ client: clientName }).lean();
+        // Fetch all hiring requests for this client mainly to build the dropdown list
+        const allClientReqs = await HiringRequest.find({ client: clientName }).select('_id roleDetails.title status').lean();
+
+        let hrQuery = { client: clientName };
+        if (hiringRequestId) {
+            hrQuery._id = hiringRequestId;
+        }
+
+        const hiringRequests = await HiringRequest.find(hrQuery).lean();
+
+        const requisitionsList = allClientReqs.map(hr => ({ id: hr._id, title: hr.roleDetails.title, status: hr.status }));
 
         if (!hiringRequests || hiringRequests.length === 0) {
             return res.status(200).json({
@@ -581,7 +593,8 @@ exports.getClientAnalytics = async (req, res) => {
                         'Rejected': 0,
                         'On Hold': 0
                     },
-                    hiringRatio: 0
+                    hiringRatio: 0,
+                    requisitionsList
                 }
             });
         }
@@ -607,29 +620,63 @@ exports.getClientAnalytics = async (req, res) => {
         const pipelineStages = {
             'Sourced': 0,
             'Pre-Screened': 0,
-            'In Interviews': 0,
-            'Hired': 0,
-            'Rejected': 0,
+            'Phase 1 Shortlisted': 0,
+            'Phase 2 Shortlisted / Interviews': 0,
+            'Phase 3 Offer Stage': 0,
+            'Joined': 0,
+            'Rejected / Drop-off': 0,
             'On Hold': 0
         };
 
         let totalHired = 0;
 
         candidates.forEach(c => {
-            const isHired = c.decision === 'Hired';
-            const isRejected = c.decision === 'Rejected';
-            const isOnHold = c.decision === 'On Hold';
-            const inInterviews = !isHired && !isRejected && !isOnHold && c.interviewRounds?.length > 0;
-
-            if (isHired) {
-                pipelineStages['Hired']++;
-                totalHired++;
+            // Count Rejected
+            if (c.decision === 'Rejected' || c.phase2Decision === 'Rejected' || c.phase3Decision === 'No Show' || c.phase3Decision === 'Offer Declined') {
+                pipelineStages['Rejected / Drop-off']++;
+                return; // Stop counting further up funnel if rejected
             }
-            else if (isRejected) pipelineStages['Rejected']++;
-            else if (isOnHold) pipelineStages['On Hold']++;
-            else if (inInterviews) pipelineStages['In Interviews']++;
-            else if (c.status === 'Pre-Screened') pipelineStages['Pre-Screened']++;
-            else pipelineStages['Sourced']++;
+            
+            // Count On Hold
+            if (c.decision === 'On Hold' || c.phase2Decision === 'On Hold') {
+                pipelineStages['On Hold']++;
+                return;
+            }
+
+            // Phase 3 (Onboarding / Final Decision)
+            if (['Offer Sent', 'Offer Accepted', 'Joined'].includes(c.phase3Decision)) {
+                if (c.phase3Decision === 'Joined') {
+                    pipelineStages['Joined']++;
+                    totalHired++;
+                } else {
+                    pipelineStages['Phase 3 Offer Stage']++;
+                }
+                return;
+            }
+
+            // Phase 2 (Client Eval)
+            if (['Shortlisted', 'Selected', 'Hired'].includes(c.phase2Decision)) {
+                pipelineStages['Phase 2 Shortlisted / Interviews']++;
+                return;
+            }
+            
+            if (c.interviewRounds?.length > 0) {
+                 pipelineStages['Phase 2 Shortlisted / Interviews']++;
+                 return;
+            }
+
+            // Phase 1 (Internal)
+            if (c.decision === 'Shortlisted') {
+                pipelineStages['Phase 1 Shortlisted']++;
+                return;
+            }
+
+            if (c.status === 'Pre-Screened') {
+                pipelineStages['Pre-Screened']++;
+                return;
+            }
+            
+            pipelineStages['Sourced']++;
         });
 
         const hiringRatio = candidates.length > 0 ? ((totalHired / candidates.length) * 100).toFixed(1) : 0;
@@ -641,8 +688,10 @@ exports.getClientAnalytics = async (req, res) => {
                 activeReqs,
                 closedReqs,
                 totalOpenPositions,
+                totalSourced: candidates.length,
                 pipeline: pipelineStages,
-                hiringRatio: Number(hiringRatio)
+                hiringRatio: Number(hiringRatio),
+                requisitionsList
             }
         });
 
