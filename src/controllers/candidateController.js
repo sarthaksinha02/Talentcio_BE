@@ -237,7 +237,7 @@ exports.getShortlistedCandidates = async (req, res) => {
             )
         );
 
-        let query = { hiringRequestId, decision: 'Shortlisted' };
+        let query = { hiringRequestId, decision: { $in: ['Shortlisted', 'Hired'] } };
 
         if (!isAdmin && !hasTaView && !isRequestParticipant) {
             query['interviewRounds.assignedTo'] = req.user._id;
@@ -356,7 +356,7 @@ exports.updateCandidate = async (req, res) => {
             'profilePulledBy', 'currentCTC', 'expectedCTC', 'inHandOffer', 'offerCompany', 'offerCTC',
             'preference', 'totalExperience', 'qualification', 'currentCompany', 'pastExperience',
             'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod',
-            'status', 'remark', 'decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId'
+            'status', 'remark', 'decision', 'phase2Decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId'
         ];
 
         allowedUpdates.forEach(field => {
@@ -484,6 +484,39 @@ exports.updateCandidateDecision = async (req, res) => {
 
     } catch (error) {
         console.error('Error updating decision:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Update candidate Phase 2 decision
+exports.updatePhase2Decision = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { phase2Decision } = req.body;
+
+        if (!phase2Decision) {
+            return res.status(400).json({ message: 'Phase 2 Decision is required' });
+        }
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        candidate.phase2Decision = phase2Decision;
+        await candidate.save();
+
+        const updatedCandidate = await Candidate.findById(id)
+            .populate('uploadedBy', 'firstName lastName email')
+            .populate('hiringRequestId', 'requestId roleDetails');
+
+        res.status(200).json({
+            message: 'Phase 2 Decision updated successfully',
+            candidate: updatedCandidate
+        });
+
+    } catch (error) {
+        console.error('Error updating Phase 2 decision:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };

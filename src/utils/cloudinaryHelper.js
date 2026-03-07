@@ -13,18 +13,23 @@ const extractPublicIdFromUrl = (url) => {
     try {
         if (!url) return null;
 
-        // Regex to match:
-        // 1. /upload/
-        // 2. Optional version: (v\d+/)?
-        // 3. Capture group for public ID: (.*)
-        // 4. \. dot and extension at the end
-        const regex = /\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z0-9]+$/;
-        const match = url.match(regex);
+        // Find the index of '/upload/'
+        const uploadIndex = url.indexOf('/upload/');
+        if (uploadIndex === -1) return null;
 
-        if (match && match[1]) {
-            return match[1];
+        // Get the string after /upload/
+        let publicId = url.substring(uploadIndex + 8);
+
+        // Remove the version string if present (e.g., v1234567890/)
+        publicId = publicId.replace(/^v\d+\//, '');
+
+        // Remove the file extension if present (e.g., .jpg, .pdf)
+        const dotIndex = publicId.lastIndexOf('.');
+        if (dotIndex !== -1) {
+            publicId = publicId.substring(0, dotIndex);
         }
-        return null;
+
+        return publicId;
 
     } catch (error) {
         console.error('Error extracting public ID from URL:', error);

@@ -108,6 +108,10 @@ const candidateSchema = new mongoose.Schema({
         },
         experienceYears: {
             type: Number
+        },
+        role: {
+            type: String,
+            trim: true
         }
     }],
 
@@ -137,14 +141,14 @@ const candidateSchema = new mongoose.Schema({
     // Status Tracking
     status: {
         type: String,
-        enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking'],
+        enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'Pre-Screened', 'In Interview'],
         required: true,
         default: 'Interested'
     },
     statusHistory: [{
         status: {
             type: String,
-            enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking']
+            enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'Pre-Screened', 'In Interview'],
         },
         changedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -188,6 +192,13 @@ const candidateSchema = new mongoose.Schema({
 
     // Hiring Decision
     decision: {
+        type: String,
+        enum: ['Hired', 'Shortlisted', 'Rejected', 'On Hold', 'None'],
+        default: 'None'
+    },
+
+    // Phase 2 Client Decision
+    phase2Decision: {
         type: String,
         enum: ['Hired', 'Shortlisted', 'Rejected', 'On Hold', 'None'],
         default: 'None'

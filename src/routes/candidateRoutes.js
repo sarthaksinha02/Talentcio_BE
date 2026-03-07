@@ -25,6 +25,7 @@ router.delete('/:id', protect, authorize('ta.delete'), candidateController.delet
 // Status update
 router.patch('/:id/status', protect, authorize('ta.edit'), candidateController.updateCandidateStatus);
 router.patch('/:id/decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updateCandidateDecision);
+router.patch('/:id/phase2-decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updatePhase2Decision);
 
 // Current User's Scheduled Interviews
 router.get('/my/interviews', protect, candidateController.getMyScheduledInterviews);
