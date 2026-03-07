@@ -68,6 +68,21 @@ const candidateSchema = new mongoose.Schema({
         type: Number,
         min: 0
     },
+
+    // Competing Offer Details
+    inHandOffer: {
+        type: Boolean,
+        default: false
+    },
+    offerCompany: {
+        type: String,
+        trim: true
+    },
+    offerCTC: {
+        type: Number,
+        min: 0
+    },
+
     preference: {
         type: String,
         enum: ['Highly Recommended', 'Recommended', 'Neutral / Average', 'Not Recommended', 'Very Poor']
@@ -174,7 +189,7 @@ const candidateSchema = new mongoose.Schema({
     // Hiring Decision
     decision: {
         type: String,
-        enum: ['Hired', 'Rejected', 'On Hold', 'None'],
+        enum: ['Hired', 'Shortlisted', 'Rejected', 'On Hold', 'None'],
         default: 'None'
     },
 

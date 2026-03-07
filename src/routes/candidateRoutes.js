@@ -17,6 +17,7 @@ router.get('/sources', protect, authorize('ta.view'), candidateController.getCan
 // CRUD operations
 router.post('/', protect, authorize('ta.create'), candidateController.createCandidate);
 router.get('/:hiringRequestId', protect, candidateController.getCandidatesByHiringRequest);
+router.get('/shortlisted/:hiringRequestId', protect, candidateController.getShortlistedCandidates);
 router.get('/candidate/:id', protect, candidateController.getCandidateById);
 router.put('/:id', protect, authorize('ta.edit'), candidateController.updateCandidate);
 router.delete('/:id', protect, authorize('ta.delete'), candidateController.deleteCandidate);

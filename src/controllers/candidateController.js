@@ -2,6 +2,7 @@ const Candidate = require('../models/Candidate');
 const { HiringRequest } = require('../models/HiringRequest');
 const { cloudinary } = require('../config/cloudinary');
 const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
+const mongoose = require('mongoose');
 
 // Upload resume to Cloudinary
 exports.uploadResume = async (req, res) => {
@@ -68,6 +69,9 @@ exports.createCandidate = async (req, res) => {
             profilePulledBy,
             currentCTC,
             expectedCTC,
+            inHandOffer,
+            offerCompany,
+            offerCTC,
             preference,
             totalExperience,
             qualification,
@@ -89,9 +93,15 @@ exports.createCandidate = async (req, res) => {
         }
 
         // Check for duplicate email in same hiring request
-        const existingCandidate = await Candidate.findOne({ hiringRequestId, email });
-        if (existingCandidate) {
-            return res.status(400).json({ message: 'Candidate with this email already exists for this hiring request' });
+        const existingByEmail = await Candidate.findOne({ hiringRequestId, email });
+        if (existingByEmail) {
+            return res.status(400).json({ message: 'A candidate with this email is already added to this hiring request' });
+        }
+
+        // Check for duplicate mobile in same hiring request
+        const existingByMobile = await Candidate.findOne({ hiringRequestId, mobile });
+        if (existingByMobile) {
+            return res.status(400).json({ message: 'A candidate with this mobile number is already added to this hiring request' });
         }
 
         // Create candidate
@@ -108,6 +118,9 @@ exports.createCandidate = async (req, res) => {
             profilePulledBy,
             currentCTC,
             expectedCTC,
+            inHandOffer: inHandOffer || false,
+            offerCompany,
+            offerCTC,
             preference,
             totalExperience,
             qualification,
@@ -142,7 +155,7 @@ exports.createCandidate = async (req, res) => {
     } catch (error) {
         console.error('Error creating candidate:', error);
         if (error.code === 11000) {
-            return res.status(400).json({ message: 'Candidate with this email already exists for this hiring request' });
+            return res.status(400).json({ message: 'A candidate with this email is already added to this hiring request' });
         }
         res.status(500).json({ message: 'Server error', error: error.message });
     }
@@ -152,6 +165,10 @@ exports.createCandidate = async (req, res) => {
 exports.getCandidatesByHiringRequest = async (req, res) => {
     try {
         const { hiringRequestId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(hiringRequestId)) {
+            return res.status(400).json({ message: 'Invalid Hiring Request ID format' });
+        }
 
         // Verify if user has access to see all candidates vs only assigned ones
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
@@ -189,6 +206,63 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching candidates:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Get shortlisted candidates for a hiring request with pagination
+exports.getShortlistedCandidates = async (req, res) => {
+    try {
+        const { hiringRequestId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(hiringRequestId)) {
+            return res.status(400).json({ message: 'Invalid Hiring Request ID format' });
+        }
+
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 10;
+        const skip = (page - 1) * limit;
+
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+
+        const hiringRequest = await HiringRequest.findById(hiringRequestId);
+        const isRequestParticipant = hiringRequest && (
+            hiringRequest.createdBy?._id?.toString() === req.user._id.toString() ||
+            hiringRequest.ownership?.hiringManager?._id?.toString() === req.user._id.toString() ||
+            hiringRequest.ownership?.recruiter?._id?.toString() === req.user._id.toString() ||
+            hiringRequest.approvalChain?.some(step =>
+                step.approvers?.some(approver => approver._id?.toString() === req.user._id.toString() || approver.toString() === req.user._id.toString())
+            )
+        );
+
+        let query = { hiringRequestId, decision: 'Shortlisted' };
+
+        if (!isAdmin && !hasTaView && !isRequestParticipant) {
+            query['interviewRounds.assignedTo'] = req.user._id;
+        }
+
+        const totalOptions = await Candidate.countDocuments(query);
+        const candidates = await Candidate.find(query)
+            .populate('uploadedBy', 'firstName lastName')
+            .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('interviewRounds.assignedTo', 'firstName lastName') // only pull what is necessary
+            .select('candidateName email mobile status decision uploadedAt interviewRounds profilePulledBy totalExperience currentCTC expectedCTC location expectedLocation pastExperience currentCompany')
+            .sort({ uploadedAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        res.status(200).json({
+            count: totalOptions,
+            totalPages: Math.ceil(totalOptions / limit),
+            currentPage: page,
+            candidates
+        });
+
+    } catch (error) {
+        console.error('Error fetching shortlisted candidates:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
@@ -279,8 +353,8 @@ exports.updateCandidate = async (req, res) => {
         // Update fields securely (prevent mass assignment)
         const allowedUpdates = [
             'candidateName', 'email', 'mobile', 'source', 'referralName',
-            'profilePulledBy', 'currentCTC', 'expectedCTC', 'preference',
-            'totalExperience', 'qualification', 'currentCompany', 'pastExperience',
+            'profilePulledBy', 'currentCTC', 'expectedCTC', 'inHandOffer', 'offerCompany', 'offerCTC',
+            'preference', 'totalExperience', 'qualification', 'currentCompany', 'pastExperience',
             'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod',
             'status', 'remark', 'decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId'
         ];

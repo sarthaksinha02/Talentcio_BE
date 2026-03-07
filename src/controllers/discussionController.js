@@ -30,11 +30,18 @@ exports.getDiscussions = async (req, res) => {
 
         const total = await Discussion.countDocuments();
 
-        const discussions = await Discussion.find()
-            .populate('createdBy', 'firstName lastName email profilePicture')
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit);
+        let discussions = await Discussion.aggregate([
+            {
+                $addFields: {
+                    isCompleted: { $cond: { if: { $eq: ["$status", "mark as complete"] }, then: 1, else: 0 } }
+                }
+            },
+            { $sort: { isCompleted: 1, createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit }
+        ]);
+
+        discussions = await Discussion.populate(discussions, { path: 'createdBy', select: 'firstName lastName email profilePicture' });
 
         res.status(200).json({
             discussions,

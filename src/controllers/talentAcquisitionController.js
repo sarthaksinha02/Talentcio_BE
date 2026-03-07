@@ -2,6 +2,7 @@ const { HiringRequest, HRRAuditLog } = require('../models/HiringRequest');
 const ApprovalWorkflow = require('../models/ApprovalWorkflow');
 const User = require('../models/User');
 const Candidate = require('../models/Candidate');
+const mongoose = require('mongoose');
 
 // Helper to generate Request ID (e.g., HRR-2023-001)
 const generateRequestId = async () => {
@@ -157,6 +158,9 @@ exports.getHiringRequests = async (req, res) => {
 // --- getHiringRequestById ---
 exports.getHiringRequestById = async (req, res) => {
     try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ message: 'Invalid Hiring Request ID format' });
+        }
         const request = await HiringRequest.findById(req.params.id)
             .populate('ownership.hiringManager', 'firstName lastName email')
             .populate('ownership.recruiter', 'firstName lastName email')
@@ -562,24 +566,24 @@ exports.getClientAnalytics = async (req, res) => {
         const hiringRequests = await HiringRequest.find({ client: clientName }).lean();
 
         if (!hiringRequests || hiringRequests.length === 0) {
-           return res.status(200).json({
-               success: true,
-               data: {
-                   totalReqs: 0,
-                   activeReqs: 0,
-                   closedReqs: 0,
-                   totalOpenPositions: 0,
-                   pipeline: {
-                    'Sourced': 0,
-                    'Pre-Screened': 0,
-                    'In Interviews': 0,
-                    'Hired': 0,
-                    'Rejected': 0,
-                    'On Hold': 0
-                   },
-                   hiringRatio: 0
-               }
-           });
+            return res.status(200).json({
+                success: true,
+                data: {
+                    totalReqs: 0,
+                    activeReqs: 0,
+                    closedReqs: 0,
+                    totalOpenPositions: 0,
+                    pipeline: {
+                        'Sourced': 0,
+                        'Pre-Screened': 0,
+                        'In Interviews': 0,
+                        'Hired': 0,
+                        'Rejected': 0,
+                        'On Hold': 0
+                    },
+                    hiringRatio: 0
+                }
+            });
         }
 
         const hrIds = hiringRequests.map(hr => hr._id);
@@ -599,7 +603,7 @@ exports.getClientAnalytics = async (req, res) => {
 
         // Track candidate pipeline
         const candidates = await Candidate.find({ hiringRequestId: { $in: hrIds } }).lean();
-        
+
         const pipelineStages = {
             'Sourced': 0,
             'Pre-Screened': 0,
@@ -616,10 +620,10 @@ exports.getClientAnalytics = async (req, res) => {
             const isRejected = c.decision === 'Rejected';
             const isOnHold = c.decision === 'On Hold';
             const inInterviews = !isHired && !isRejected && !isOnHold && c.interviewRounds?.length > 0;
-           
-            if (isHired) { 
-                pipelineStages['Hired']++; 
-                totalHired++; 
+
+            if (isHired) {
+                pipelineStages['Hired']++;
+                totalHired++;
             }
             else if (isRejected) pipelineStages['Rejected']++;
             else if (isOnHold) pipelineStages['On Hold']++;
