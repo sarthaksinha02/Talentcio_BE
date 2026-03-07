@@ -455,6 +455,60 @@ exports.updateCandidateStatus = async (req, res) => {
     }
 };
 
+// Update candidate remark
+exports.updateCandidateRemark = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { remark } = req.body;
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        candidate.remark = remark;
+        await candidate.save();
+
+        const updatedCandidate = await Candidate.findById(id)
+            .populate('uploadedBy', 'firstName lastName email')
+            .populate('hiringRequestId', 'requestId roleDetails');
+
+        res.status(200).json({
+            message: 'Remark updated successfully',
+            candidate: updatedCandidate
+        });
+
+    } catch (error) {
+        console.error('Error updating remark:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Update candidate internal remark (separate from sourcing remark)
+exports.updateCandidateInternalRemark = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { internalRemark } = req.body;
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        candidate.internalRemark = internalRemark;
+        await candidate.save();
+
+        res.status(200).json({
+            message: 'Internal remark updated successfully',
+            internalRemark: candidate.internalRemark
+        });
+
+    } catch (error) {
+        console.error('Error updating internal remark:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 // Update candidate decision
 exports.updateCandidateDecision = async (req, res) => {
     try {

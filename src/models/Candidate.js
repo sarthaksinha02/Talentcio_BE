@@ -218,6 +218,11 @@ const candidateSchema = new mongoose.Schema({
     remark: {
         type: String,
         trim: true
+    },
+
+    internalRemark: {
+        type: String,
+        trim: true
     }
 }, {
     timestamps: true

@@ -24,6 +24,8 @@ router.delete('/:id', protect, authorize('ta.delete'), candidateController.delet
 
 // Status update
 router.patch('/:id/status', protect, authorize('ta.edit'), candidateController.updateCandidateStatus);
+router.patch('/:id/remark', protect, authorize('ta.edit'), candidateController.updateCandidateRemark);
+router.patch('/:id/internal-remark', protect, candidateController.updateCandidateInternalRemark);
 router.patch('/:id/decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updateCandidateDecision);
 router.patch('/:id/phase2-decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updatePhase2Decision);
 router.patch('/:id/phase3-decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updatePhase3Decision);
