@@ -356,7 +356,7 @@ exports.updateCandidate = async (req, res) => {
             'profilePulledBy', 'currentCTC', 'expectedCTC', 'inHandOffer', 'offerCompany', 'offerCTC',
             'preference', 'totalExperience', 'qualification', 'currentCompany', 'pastExperience',
             'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod',
-            'status', 'remark', 'decision', 'phase2Decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId'
+            'status', 'remark', 'decision', 'phase2Decision', 'phase3Decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId'
         ];
 
         allowedUpdates.forEach(field => {
@@ -517,6 +517,39 @@ exports.updatePhase2Decision = async (req, res) => {
 
     } catch (error) {
         console.error('Error updating Phase 2 decision:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Update candidate Phase 3 decision (Offer & Onboarding)
+exports.updatePhase3Decision = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { phase3Decision } = req.body;
+
+        if (!phase3Decision) {
+            return res.status(400).json({ message: 'Phase 3 Decision is required' });
+        }
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        candidate.phase3Decision = phase3Decision;
+        await candidate.save();
+
+        const updatedCandidate = await Candidate.findById(id)
+            .populate('uploadedBy', 'firstName lastName email')
+            .populate('hiringRequestId', 'requestId roleDetails');
+
+        res.status(200).json({
+            message: 'Phase 3 Decision updated successfully',
+            candidate: updatedCandidate
+        });
+
+    } catch (error) {
+        console.error('Error updating Phase 3 decision:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };

@@ -204,7 +204,14 @@ const candidateSchema = new mongoose.Schema({
     // Phase 2 Client Decision
     phase2Decision: {
         type: String,
-        enum: ['Hired', 'Shortlisted', 'Rejected', 'On Hold', 'None'],
+        enum: ['Hired', 'Shortlisted', 'Selected', 'Rejected', 'On Hold', 'None'],
+        default: 'None'
+    },
+
+    // Phase 3 Offer & Onboarding Decision
+    phase3Decision: {
+        type: String,
+        enum: ['Offer Sent', 'Offer Accepted', 'Offer Declined', 'Joined', 'No Show', 'None'],
         default: 'None'
     },
 
