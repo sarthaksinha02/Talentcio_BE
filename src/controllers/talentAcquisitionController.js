@@ -659,6 +659,7 @@ exports.getClientAnalytics = async (req, res) => {
             // Phase 2 (Client Eval)
             if (c.phase2Decision === 'Selected') {
                 pipelineStages['Phase 2 Selected']++;
+                pipelineStages['Phase 2 Shortlisted']++; // Included in Shortlisted metrics as well
                 return;
             }
 
