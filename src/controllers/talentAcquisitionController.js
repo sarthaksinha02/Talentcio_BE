@@ -903,14 +903,40 @@ exports.getGlobalAnalytics = async (req, res) => {
         }
 
         const candidates = await Candidate.find(candidateQuery)
-            .populate('hiringRequestId', 'client roleDetails.title roleDetails.department status createdAt closedAt')
+            .populate('hiringRequestId', 'client roleDetails.title roleDetails.department status createdAt closedAt hiringDetails')
+            .populate('uploadedBy', 'firstName lastName')
             .lean();
 
-        const activeCandidates = candidates;
+        // Process Recruiter names correctly for filtering and display
+        const getCandidateRecruiterName = (c) => {
+            if (c.profilePulledBy) return c.profilePulledBy;
+            if (c.uploadedBy) return `${c.uploadedBy.firstName || ''} ${c.uploadedBy.lastName || ''}`.trim();
+            return 'Self/Other';
+        };
+
+        // If recruiter filter is manually passed, we need to filter the candidate list precisely
+        let filteredCandidates = candidates;
+        if (recruiter) {
+            filteredCandidates = candidates.filter(c => {
+                const name = getCandidateRecruiterName(c);
+                return name.toLowerCase().includes(recruiter.toLowerCase());
+            });
+        }
+
+        const activeCandidates = filteredCandidates;
         
+        // Identify active hiring requests after filtering candidates
+        // This ensures stats like "Total Requisitions" match the filtered candidate activity
+        const activeHrIds = [...new Set(activeCandidates.map(c => c.hiringRequestId?._id?.toString()).filter(Boolean))];
+        const activeHrSet = new Set(activeHrIds);
+        
+        const filteredHiringRequests = (startDate || endDate || recruiter) 
+            ? hiringRequests.filter(hr => activeHrSet.has(hr._id.toString()))
+            : hiringRequests;
+
         // Metrics containers
         let totalOpenPositions = 0;
-        hiringRequests.forEach(hr => {
+        filteredHiringRequests.forEach(hr => {
             if (hr.status !== 'Closed') {
                 totalOpenPositions += (hr.hiringDetails?.openPositions || 1);
             }
@@ -946,7 +972,7 @@ exports.getGlobalAnalytics = async (req, res) => {
             const dept = hrInfo.roleDetails?.department || 'General';
             const clientName = hrInfo.client || 'General';
             const reqId = hrInfo._id?.toString() || 'Unknown';
-            const recName = c.profilePulledBy || c.uploadedBy?.name || 'Self/Other';
+            const recName = getCandidateRecruiterName(c);
             const src = c.source || 'Direct';
 
             const monthObj = new Date(c.createdAt || new Date());
@@ -958,7 +984,7 @@ exports.getGlobalAnalytics = async (req, res) => {
             if (!clientAnalysis[clientName]) clientAnalysis[clientName] = { sourced: 0, interviewed: 0, offered: 0, joined: 0 };
             if (!recruiterPerf[recName]) recruiterPerf[recName] = { sourced: 0, interviews: 0, offers: 0, joined: 0 };
             if (!sourceAnalysis[src]) sourceAnalysis[src] = { sourced: 0, joined: 0 };
-            if (!positionPerf[reqId]) positionPerf[reqId] = { title: hrInfo.roleDetails?.title || 'Unknown', client: clientName, open: hrInfo.hiringDetails?.numberOfPositions || 1, sourced: 0, interviewed: 0, offered: 0, joined: 0 };
+            if (!positionPerf[reqId]) positionPerf[reqId] = { title: hrInfo.roleDetails?.title || 'Unknown', client: clientName, open: hrInfo.hiringDetails?.openPositions || 1, sourced: 0, interviewed: 0, offered: 0, joined: 0 };
 
             deptAnalysis[dept].sourced++;
             clientAnalysis[clientName].sourced++;
@@ -1049,7 +1075,7 @@ exports.getGlobalAnalytics = async (req, res) => {
         });
 
         // Time to fill (req based)
-        hiringRequests.forEach(hr => {
+        filteredHiringRequests.forEach(hr => {
             if (hr.status === 'Closed' && hr.closedAt && hr.createdAt) {
                 totalTimeToFill += (new Date(hr.closedAt) - new Date(hr.createdAt)) / (1000 * 60 * 60 * 24);
                 closedReqsCount++;
@@ -1058,7 +1084,7 @@ exports.getGlobalAnalytics = async (req, res) => {
 
         // Phase-specific metric overrides
         let displayMetrics = {
-            totalReqs: hiringRequests.length,
+            totalReqs: filteredHiringRequests.length,
             totalOpenPositions,
             totalSourced: activeCandidates.length,
             interviewsScheduled,
@@ -1111,7 +1137,7 @@ exports.getGlobalAnalytics = async (req, res) => {
             clients: [...new Set(hiringRequests.map(hr => hr.client).filter(Boolean))].sort(),
             departments: [...new Set(hiringRequests.map(hr => hr.roleDetails?.department).filter(Boolean))].sort(),
             positions: [...new Set(hiringRequests.map(hr => hr.roleDetails?.title).filter(Boolean))].sort(),
-            recruiters: [...new Set(candidates.map(c => c.profilePulledBy || c.uploadedBy?.name).filter(Boolean))].sort()
+            recruiters: [...new Set(candidates.map(c => getCandidateRecruiterName(c)).filter(Boolean))].sort()
         };
 
         res.status(200).json({
