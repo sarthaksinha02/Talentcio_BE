@@ -14,7 +14,7 @@ const generateRequestId = async () => {
 // --- createHiringRequest ---
 exports.createHiringRequest = async (req, res) => {
     try {
-        const { client, roleDetails, purpose, requirements, hiringDetails, ownership, replacementDetails, interviewWorkflowId } = req.body;
+        const { client, roleDetails, purpose, requirements, hiringDetails, ownership, replacementDetails, interviewWorkflowId, previousRequestId } = req.body;
         const submitNow = req.query.submit === 'true';
 
         // validations...
@@ -56,7 +56,8 @@ exports.createHiringRequest = async (req, res) => {
             interviewWorkflowId: interviewWorkflowId || undefined,
             currentApprovalLevel: approvals.length > 0 ? 1 : 0,
             status: submitNow ? 'Submitted' : 'Draft',
-            createdBy: req.user._id
+            createdBy: req.user._id,
+            previousRequestId: previousRequestId || undefined
         });
 
         if (submitNow) {
@@ -88,8 +89,15 @@ exports.createHiringRequest = async (req, res) => {
             hiringRequestId: newRequest._id,
             action: submitNow ? 'CREATED_AND_SUBMITTED' : 'CREATED_DRAFT',
             performedBy: req.user._id,
-            details: { status: newRequest.status, workflowId: workflow?._id }
+            details: { status: newRequest.status, workflowId: workflow?._id, previousRequestId }
         });
+
+        // Update the previous request to point to this new one
+        if (previousRequestId) {
+            await HiringRequest.findByIdAndUpdate(previousRequestId, {
+                reopenedToId: newRequest._id
+            });
+        }
 
         res.status(201).json(newRequest);
     } catch (error) {
@@ -532,11 +540,25 @@ exports.closeHiringRequest = async (req, res) => {
 
         const request = await HiringRequest.findByIdAndUpdate(
             id,
-            { status: 'Closed' },
+            { status: 'Closed', closedAt: new Date() },
             { new: true }
         );
 
         if (!request) return res.status(404).json({ message: 'Not found' });
+
+        // Update candidates with "None" or empty decisions to "Rejected"
+        await Candidate.updateMany(
+            { hiringRequestId: id, decision: { $in: ['None', null, ''] } },
+            { $set: { decision: 'Rejected' } }
+        );
+        await Candidate.updateMany(
+            { hiringRequestId: id, phase2Decision: { $in: ['None', null, ''] } },
+            { $set: { phase2Decision: 'Rejected' } }
+        );
+        await Candidate.updateMany(
+            { hiringRequestId: id, phase3Decision: { $in: ['None', null, ''] } },
+            { $set: { phase3Decision: 'Rejected' } }
+        );
 
         await HRRAuditLog.create({
             hiringRequestId: request._id,
@@ -547,6 +569,120 @@ exports.closeHiringRequest = async (req, res) => {
 
         res.status(200).json(request);
 
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+// --- getPreviousCandidates ---
+// Returns candidates grouped by each previous opening, in newest-first order
+exports.getPreviousCandidates = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const currentReq = await HiringRequest.findById(id).select('previousRequestId');
+        if (!currentReq || !currentReq.previousRequestId) {
+            return res.status(200).json([]);
+        }
+
+        // Trace back all previous requisitions (oldest last in chain)
+        let pId = currentReq.previousRequestId;
+        const legacyRequisitions = []; // ordered: pId is most recent previous
+
+        while (pId) {
+            const r = await HiringRequest.findById(pId)
+                .select('requestId status createdAt closedAt previousRequestId roleDetails')
+                .lean();
+            if (!r) break;
+            legacyRequisitions.push(r);
+            pId = r.previousRequestId || null;
+        }
+
+        // Fetch candidates for each requisition and group them
+        const groups = await Promise.all(
+            legacyRequisitions.map(async (req) => {
+                const candidates = await Candidate.find({ hiringRequestId: req._id }).lean();
+                return {
+                    requisition: {
+                        _id: req._id,
+                        requestId: req.requestId,
+                        status: req.status,
+                        createdAt: req.createdAt,
+                        closedAt: req.closedAt,
+                        title: req.roleDetails?.title
+                    },
+                    candidates
+                };
+            })
+        );
+
+        // Return newest previous opening first
+        res.status(200).json(groups);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// --- transferCandidate ---
+exports.transferCandidate = async (req, res) => {
+    try {
+        const { candidateId } = req.params;
+        const candidate = await Candidate.findById(candidateId);
+
+        if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
+
+        // Find the most recent requisition in the chain
+        let currentReq = await HiringRequest.findById(candidate.hiringRequestId).select('reopenedToId');
+        let newestReqId = currentReq ? currentReq._id : null;
+
+        while (currentReq && currentReq.reopenedToId) {
+            newestReqId = currentReq.reopenedToId;
+            currentReq = await HiringRequest.findById(currentReq.reopenedToId).select('reopenedToId hover');
+        }
+
+        if (!newestReqId || newestReqId.toString() === candidate.hiringRequestId.toString()) {
+            return res.status(400).json({ message: 'No active newer requisition found to transfer to' });
+        }
+
+        // Check if candidate is already transferred
+        const existingTransfer = await Candidate.findOne({
+            email: candidate.email,
+            hiringRequestId: newestReqId
+        });
+
+        if (existingTransfer) {
+            return res.status(400).json({ message: 'Candidate exists in the target requisition' });
+        }
+
+        // Clone Candidate
+        const newCandidateData = candidate.toObject();
+        delete newCandidateData._id;
+        delete newCandidateData.createdAt;
+        delete newCandidateData.updatedAt;
+        delete newCandidateData.__v;
+
+        newCandidateData.hiringRequestId = newestReqId;
+        newCandidateData.isTransferred = true;
+        newCandidateData.transferredFrom = candidate.hiringRequestId;
+
+        // Reset process statuses
+        newCandidateData.status = 'Interested';
+        newCandidateData.statusHistory = [{
+            status: 'Interested',
+            changedBy: req.user._id,
+            changedAt: new Date(),
+            remark: 'Transferred from previous requisition'
+        }];
+        newCandidateData.decision = 'None';
+        newCandidateData.phase2Decision = 'None';
+        newCandidateData.phase3Decision = 'None';
+        newCandidateData.interviewRounds = [];
+
+        const newCandidate = new Candidate(newCandidateData);
+        await newCandidate.save();
+
+        res.status(201).json({ message: 'Candidate transferred successfully', candidate: newCandidate });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error', error: error.message });
@@ -630,11 +766,41 @@ exports.getClientAnalytics = async (req, res) => {
             'On Hold': 0
         };
 
-        let totalHired = 0;
+        // Deduplicate and process candidates (keep highest achieved status)
+        const candidateMap = new Map(); // email -> candidateObject
+
+        const getStatusWeight = (c) => {
+            if (c.phase3Decision === 'Joined' && c.phase2Decision === 'Selected') return 100;
+            if (['Offer Sent', 'Offer Accepted'].includes(c.phase3Decision)) return 90;
+            if (c.phase2Decision === 'Selected') return 80;
+            if (c.phase2Decision === 'Shortlisted') return 70;
+            if (c.decision === 'Shortlisted') return 60;
+            if (c.status === 'Pre-Screened') return 50;
+            if (['Interested', 'In Interview'].includes(c.status)) return 40;
+            return 0;
+        };
 
         candidates.forEach(c => {
-            // Count Rejected / On Hold first — these stop the funnel
-            if (c.decision === 'Rejected' || c.phase2Decision === 'Rejected' || c.phase3Decision === 'No Show' || c.phase3Decision === 'Offer Declined') {
+            if (c.status === 'Not Relevant') return;
+            const existing = candidateMap.get(c.email);
+            if (!existing || getStatusWeight(c) > getStatusWeight(existing)) {
+                candidateMap.set(c.email, c);
+            }
+        });
+
+        const uniqueCandidates = Array.from(candidateMap.values());
+        let totalHired = 0;
+
+        uniqueCandidates.forEach(c => {
+            // Drop-offs first
+            if (
+                c.decision === 'Rejected' || 
+                c.phase2Decision === 'Rejected' || 
+                c.phase3Decision === 'No Show' || 
+                c.phase3Decision === 'Offer Declined' ||
+                c.status === 'Not Interested' ||
+                c.status === 'Not Picking'
+            ) {
                 pipelineStages['Rejected / Drop-off']++;
                 return;
             }
@@ -644,16 +810,14 @@ exports.getClientAnalytics = async (req, res) => {
                 return;
             }
 
-            // Count cumulatively — a candidate in Phase 3 should also appear in Phase 2 counts
-            // Phase 3
-            if (['Offer Sent', 'Offer Accepted', 'Joined'].includes(c.phase3Decision)) {
+            // Phase 3 (Strict gate: must be Selected in Phase 2)
+            if (['Offer Sent', 'Offer Accepted', 'Joined'].includes(c.phase3Decision) && c.phase2Decision === 'Selected') {
                 if (c.phase3Decision === 'Joined') {
                     pipelineStages['Joined']++;
                     totalHired++;
                 } else {
                     pipelineStages['Phase 3 Offer Stage']++;
                 }
-                // Also count in Phase 2 since they were selected
                 pipelineStages['Phase 2 Selected']++;
                 pipelineStages['Phase 2 Shortlisted']++;
                 return;
@@ -690,7 +854,7 @@ exports.getClientAnalytics = async (req, res) => {
             pipelineStages['Sourced']++;
         });
 
-        const hiringRatio = candidates.length > 0 ? ((totalHired / candidates.length) * 100).toFixed(1) : 0;
+        const hiringRatio = uniqueCandidates.length > 0 ? ((totalHired / uniqueCandidates.length) * 100).toFixed(1) : 0;
 
         res.status(200).json({
             success: true,
@@ -699,15 +863,331 @@ exports.getClientAnalytics = async (req, res) => {
                 activeReqs,
                 closedReqs,
                 totalOpenPositions,
-                totalSourced: candidates.length,
+                totalSourced: uniqueCandidates.length,
                 pipeline: pipelineStages,
                 hiringRatio: Number(hiringRatio),
                 requisitionsList
             }
         });
 
+
     } catch (error) {
         console.error('Error fetching client analytics:', error);
         res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+    }
+};
+
+// --- Global Analytics ---
+// --- Global Analytics ---
+exports.getGlobalAnalytics = async (req, res) => {
+    try {
+        const { client, department, position, recruiter, startDate, endDate, phase } = req.query;
+
+        // Visibility permissions
+        const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
+        const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
+        const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
+
+        let hrQuery = {};
+        if (!isAdmin && !hasTaView) {
+            const candidatesWithUserAsInterviewer = await Candidate.find({
+                'interviewRounds.assignedTo': req.user._id
+            }).select('hiringRequestId').lean();
+
+            const interviewHiringRequestIds = candidatesWithUserAsInterviewer.map(c => c.hiringRequestId);
+
+            hrQuery['$or'] = [
+                { createdBy: req.user._id },
+                { 'ownership.hiringManager': req.user._id },
+                { 'ownership.recruiter': req.user._id },
+                { _id: { $in: interviewHiringRequestIds } }
+            ];
+        }
+
+        if (client) hrQuery.client = new RegExp(client, 'i');
+        if (department) hrQuery['roleDetails.department'] = new RegExp(department, 'i');
+        if (position) hrQuery['roleDetails.title'] = new RegExp(position, 'i');
+
+        const hiringRequests = await HiringRequest.find(hrQuery).select('_id roleDetails.department roleDetails.title client hiringDetails status createdAt closedAt').lean();
+        const hrIds = hiringRequests.map(hr => hr._id);
+
+        let candidateQuery = { hiringRequestId: { $in: hrIds } };
+        if (startDate || endDate) {
+            candidateQuery.createdAt = {};
+            if (startDate) candidateQuery.createdAt.$gte = new Date(startDate);
+            if (endDate) candidateQuery.createdAt.$lte = new Date(endDate);
+        }
+        if (recruiter) {
+            candidateQuery.profilePulledBy = new RegExp(recruiter, 'i');
+        }
+
+        const candidates = await Candidate.find(candidateQuery)
+            .populate('hiringRequestId', 'client roleDetails.title roleDetails.department status createdAt closedAt')
+            .lean();
+
+        const candidateMap = new Map();
+        const getStatusWeight = (c) => {
+            if (c.phase3Decision === 'Joined' && c.phase2Decision === 'Selected') return 100;
+            if (['Offer Sent', 'Offer Accepted'].includes(c.phase3Decision)) return 90;
+            if (c.phase2Decision === 'Selected') return 80;
+            if (c.phase2Decision === 'Shortlisted') return 70;
+            if (c.decision === 'Shortlisted') return 60;
+            if (c.status === 'Pre-Screened') return 50;
+            return 40;
+        };
+
+        candidates.forEach(c => {
+            if (c.status === 'Not Relevant') return;
+            const existing = candidateMap.get(c.email);
+            if (!existing || getStatusWeight(c) > getStatusWeight(existing)) {
+                candidateMap.set(c.email, c);
+            }
+        });
+
+        const activeCandidates = Array.from(candidateMap.values());
+        
+        // Metrics containers
+        let totalOpenPositions = 0;
+        hiringRequests.forEach(hr => {
+            if (hr.status !== 'Closed') {
+                totalOpenPositions += (hr.hiringDetails?.numberOfPositions || 1);
+            }
+        });
+
+        const pipeline = { 'Sourced': 0, 'Pre-Screened': 0, 'Ph 1 Shortlisted': 0, 'Ph 2 Shortlisted': 0, 'Final Selection': 0, 'Offer Released': 0, 'Joined': 0 };
+        const funnel = { screened: 0, interview: 0, offer: 0 };
+        const deptAnalysis = {};
+        const clientAnalysis = {};
+        const recruiterPerf = {};
+        const positionPerf = {};
+        const sourceAnalysis = {};
+        const monthlyTrend = {};
+
+        let interviewsScheduled = 0;
+        let offersReleased = 0;
+        let totalJoined = 0;
+        let hiresWithTime = 0;
+        let sumTimeToHireDays = 0;
+        let closedReqsCount = 0;
+        let totalTimeToFill = 0;
+
+        // For time metrics averages
+        let interviewCount = 0;
+        let offerReleaseCount = 0;
+        let joinedAfterOfferCount = 0;
+        let sourceToInterviewTime = 0;
+        let interviewToOfferTime = 0;
+        let offerToJoinTime = 0;
+
+        activeCandidates.forEach(c => {
+            const hrInfo = c.hiringRequestId || {};
+            const dept = hrInfo.roleDetails?.department || 'General';
+            const clientName = hrInfo.client || 'General';
+            const reqId = hrInfo._id?.toString() || 'Unknown';
+            const recName = c.profilePulledBy || c.uploadedBy?.name || 'Self/Other';
+            const src = c.source || 'Direct';
+
+            const monthObj = new Date(c.createdAt || new Date());
+            const month = `${monthObj.getFullYear()}-${String(monthObj.getMonth() + 1).padStart(2, '0')}`;
+            if (!monthlyTrend[month]) monthlyTrend[month] = { sourced: 0, interviews: 0, offers: 0, joined: 0 };
+            monthlyTrend[month].sourced++;
+
+            if (!deptAnalysis[dept]) deptAnalysis[dept] = { sourced: 0, interviewed: 0, offered: 0, joined: 0 };
+            if (!clientAnalysis[clientName]) clientAnalysis[clientName] = { sourced: 0, interviewed: 0, offered: 0, joined: 0 };
+            if (!recruiterPerf[recName]) recruiterPerf[recName] = { sourced: 0, interviews: 0, offers: 0, joined: 0 };
+            if (!sourceAnalysis[src]) sourceAnalysis[src] = { sourced: 0, joined: 0 };
+            if (!positionPerf[reqId]) positionPerf[reqId] = { title: hrInfo.roleDetails?.title || 'Unknown', client: clientName, open: hrInfo.hiringDetails?.numberOfPositions || 1, sourced: 0, interviewed: 0, offered: 0, joined: 0 };
+
+            deptAnalysis[dept].sourced++;
+            clientAnalysis[clientName].sourced++;
+            recruiterPerf[recName].sourced++;
+            sourceAnalysis[src].sourced++;
+            positionPerf[reqId].sourced++;
+
+            // Scheduled Interview Count
+            const scheduledRounds = c.interviewRounds?.filter(r => r.status === 'Scheduled');
+            if (scheduledRounds?.length > 0) {
+                if (phase && phase !== 'all') {
+                    if (scheduledRounds.some(r => r.phase === parseInt(phase))) {
+                        interviewsScheduled++;
+                    }
+                } else {
+                    interviewsScheduled++;
+                }
+            }
+
+            // Progression tracking
+            if (c.status === 'Pre-Screened' || c.decision !== 'None' || c.phase2Decision !== 'None') {
+                funnel.screened++;
+            }
+
+            if (c.interviewRounds?.length > 0) {
+                funnel.interview++;
+                deptAnalysis[dept].interviewed++;
+                clientAnalysis[clientName].interviewed++;
+                recruiterPerf[recName].interviews++;
+                positionPerf[reqId].interviewed++;
+                monthlyTrend[month].interviews++;
+
+                const firstInterview = c.interviewRounds[0].scheduledDate || c.interviewRounds[0].evaluatedAt;
+                if (firstInterview) {
+                    sourceToInterviewTime += (new Date(firstInterview) - new Date(c.createdAt)) / (1000 * 60 * 60 * 24);
+                    interviewCount++;
+                }
+            }
+
+            // Pipeline snapshots
+            if (c.phase3Decision === 'Joined') pipeline['Joined']++;
+            else if (['Offer Sent', 'Offer Accepted'].includes(c.phase3Decision)) pipeline['Offer Released']++;
+            else if (c.phase2Decision === 'Selected') pipeline['Final Selection']++;
+            else if (c.phase2Decision === 'Shortlisted') pipeline['Ph 2 Shortlisted']++;
+            else if (c.decision === 'Shortlisted') pipeline['Ph 1 Shortlisted']++;
+            else if (c.status === 'Pre-Screened') pipeline['Pre-Screened']++;
+            else pipeline['Sourced']++;
+
+            if (['Offer Sent', 'Offer Accepted', 'Joined'].includes(c.phase3Decision) && c.phase2Decision === 'Selected') {
+                funnel.offer++;
+                offersReleased++;
+                deptAnalysis[dept].offered++;
+                clientAnalysis[clientName].offered++;
+                recruiterPerf[recName].offers++;
+                positionPerf[reqId].offered++;
+                monthlyTrend[month].offers++;
+
+                const offerDate = c.statusHistory?.find(h => h.status === 'Offer Released')?.changedAt || c.updatedAt;
+                const lastIntv = [...c.interviewRounds].reverse().find(r => r.evaluatedAt)?.evaluatedAt;
+                if (offerDate && lastIntv) {
+                    interviewToOfferTime += (new Date(offerDate) - new Date(lastIntv)) / (1000 * 60 * 60 * 24);
+                    offerReleaseCount++;
+                }
+            }
+
+            if (c.phase3Decision === 'Joined' && c.phase2Decision === 'Selected') {
+                totalJoined++;
+                deptAnalysis[dept].joined++;
+                clientAnalysis[clientName].joined++;
+                recruiterPerf[recName].joined++;
+                sourceAnalysis[src].joined++;
+                positionPerf[reqId].joined++;
+                monthlyTrend[month].joined++;
+
+                const joinDate = c.statusHistory?.find(h => h.status === 'Joined')?.changedAt || c.updatedAt;
+                const offerDate = c.statusHistory?.find(h => h.status === 'Offer Released')?.changedAt;
+                if (joinDate && offerDate) {
+                    offerToJoinTime += (new Date(joinDate) - new Date(offerDate)) / (1000 * 60 * 60 * 24);
+                    joinedAfterOfferCount++;
+                }
+
+                if (joinDate && c.createdAt) {
+                    sumTimeToHireDays += (new Date(joinDate) - new Date(c.createdAt)) / (1000 * 60 * 60 * 24);
+                    hiresWithTime++;
+                }
+            }
+        });
+
+        // Time to fill (req based)
+        hiringRequests.forEach(hr => {
+            if (hr.status === 'Closed' && hr.closedAt && hr.createdAt) {
+                totalTimeToFill += (new Date(hr.closedAt) - new Date(hr.createdAt)) / (1000 * 60 * 60 * 24);
+                closedReqsCount++;
+            }
+        });
+
+        // Phase-specific metric overrides
+        let displayMetrics = {
+            totalReqs: hiringRequests.length,
+            totalOpenPositions,
+            totalSourced: activeCandidates.length,
+            interviewsScheduled,
+            offersReleased,
+            totalJoined,
+            offerAcceptanceRate: offersReleased > 0 ? ((totalJoined / offersReleased) * 100).toFixed(1) : 0,
+            joiningConversionRate: activeCandidates.length > 0 ? ((totalJoined / activeCandidates.length) * 100).toFixed(1) : 0,
+            avgTimeToHire: hiresWithTime > 0 ? Math.round(sumTimeToHireDays / hiresWithTime) : 0,
+            avgTimeToFill: closedReqsCount > 0 ? Math.round(totalTimeToFill / closedReqsCount) : 0
+        };
+
+        if (phase === '1') {
+            const ph1Shortlisted = activeCandidates.filter(c => c.decision === 'Shortlisted').length;
+            displayMetrics = {
+                ...displayMetrics,
+                totalSourced: activeCandidates.length,
+                interviewsScheduled: activeCandidates.filter(c => c.interviewRounds?.some(r => r.phase === 1 && r.status === 'Scheduled')).length,
+                ph1Shortlisted,
+                conversionRate: activeCandidates.length > 0 ? ((ph1Shortlisted / activeCandidates.length) * 100).toFixed(1) : 0
+            };
+        } else if (phase === '2') {
+            const ph1Selected = activeCandidates.filter(c => c.decision === 'Shortlisted').length;
+            const ph2Selected = activeCandidates.filter(c => c.phase2Decision === 'Selected').length;
+            displayMetrics = {
+                ...displayMetrics,
+                totalSourced: ph1Selected,
+                interviewsScheduled: activeCandidates.filter(c => c.interviewRounds?.some(r => r.phase === 2 && r.status === 'Scheduled')).length,
+                ph2Selected,
+                conversionRate: ph1Selected > 0 ? ((ph2Selected / ph1Selected) * 100).toFixed(1) : 0
+            };
+        } else if (phase === '3') {
+            const ph2Selected = activeCandidates.filter(c => c.phase2Decision === 'Selected').length;
+            displayMetrics = {
+                ...displayMetrics,
+                totalSourced: ph2Selected,
+                interviewsScheduled: 0,
+                offersReleased,
+                totalJoined,
+                conversionRate: ph2Selected > 0 ? ((totalJoined / ph2Selected) * 100).toFixed(1) : 0
+            };
+        }
+
+        // Monthly Trend
+        const monthlyTrendArray = Object.keys(monthlyTrend).sort().map(m => ({
+            month: m,
+            ...monthlyTrend[m]
+        }));
+
+        const filterOptions = {
+            clients: [...new Set(hiringRequests.map(hr => hr.client).filter(Boolean))].sort(),
+            departments: [...new Set(hiringRequests.map(hr => hr.roleDetails?.department).filter(Boolean))].sort(),
+            positions: [...new Set(hiringRequests.map(hr => hr.roleDetails?.title).filter(Boolean))].sort(),
+            recruiters: [...new Set(candidates.map(c => c.profilePulledBy || c.uploadedBy?.name).filter(Boolean))].sort()
+        };
+
+        res.status(200).json({
+            success: true,
+            data: {
+                topMetrics: displayMetrics,
+                pipelineDistribution: Object.keys(pipeline).map(key => ({
+                    name: key,
+                    value: pipeline[key]
+                })).filter(d => d.value > 0),
+                recruitmentFunnel: [
+                    { name: 'Sourced', value: activeCandidates.length },
+                    { name: 'Screened', value: funnel.screened },
+                    { name: 'Interview', value: funnel.interview },
+                    { name: 'Offer', value: funnel.offer },
+                    { name: 'Joined', value: totalJoined }
+                ],
+                departmentAnalysis: Object.keys(deptAnalysis).map(d => ({ name: d, ...deptAnalysis[d] })),
+                clientAnalysis: Object.keys(clientAnalysis).map(c => ({ name: c, ...clientAnalysis[c] })),
+                recruiterPerformance: Object.keys(recruiterPerf)
+                    .map(r => ({
+                        name: r,
+                        ...recruiterPerf[r],
+                        conversion: recruiterPerf[r].sourced > 0 ? ((recruiterPerf[r].joined / recruiterPerf[r].sourced) * 100).toFixed(1) : 0
+                    }))
+                    .sort((a, b) => b.joined - a.joined),
+                positionPerformance: Object.keys(positionPerf).map(id => ({ id, ...positionPerf[id] })),
+                timeMetrics: [
+                    { name: 'Source to Interview', value: interviewCount > 0 ? Math.round(sourceToInterviewTime / interviewCount) : 0 },
+                    { name: 'Interview to Offer', value: offerReleaseCount > 0 ? Math.round(interviewToOfferTime / offerReleaseCount) : 0 },
+                    { name: 'Offer to Joining', value: joinedAfterOfferCount > 0 ? Math.round(offerToJoinTime / joinedAfterOfferCount) : 0 }
+                ],
+                sourceAnalysis: Object.keys(sourceAnalysis).map(s => ({ name: s, ...sourceAnalysis[s] })),
+                monthlyTrend: monthlyTrendArray,
+                filterOptions
+            }
+        });
+    } catch (error) {
+        console.error('getGlobalAnalytics error:', error);
+        res.status(500).json({ success: false, message: 'Internal Server Error', error: error.message });
     }
 };

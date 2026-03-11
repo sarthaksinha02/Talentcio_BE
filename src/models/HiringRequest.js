@@ -96,7 +96,12 @@ const HiringRequestSchema = new mongoose.Schema({
     }],
     currentApprovalLevel: { type: Number, default: 1 },
 
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+
+    // Tracking Reopened Requisitions
+    previousRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' },
+    reopenedToId: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' },
+    closedAt: { type: Date }
 
 }, { timestamps: true });
 

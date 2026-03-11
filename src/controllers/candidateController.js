@@ -815,8 +815,8 @@ exports.getCandidatesByPulledBy = async (req, res) => {
         const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
         // We assume userName is the literal string stored in `profilePulledBy`
-        // Mongoose query
-        const query = { profilePulledBy: userName };
+        // Use a case-insensitive regex for more robust matching
+        const query = { profilePulledBy: { $regex: new RegExp(`^${userName}$`, 'i') } };
 
         const candidates = await Candidate.find(query)
             .populate('hiringRequestId', 'requestId roleDetails')

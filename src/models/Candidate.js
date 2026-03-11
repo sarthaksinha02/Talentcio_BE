@@ -223,7 +223,11 @@ const candidateSchema = new mongoose.Schema({
     internalRemark: {
         type: String,
         trim: true
-    }
+    },
+
+    // Tracking Reopened Candidates
+    isTransferred: { type: Boolean, default: false },
+    transferredFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' }
 }, {
     timestamps: true
 });
