@@ -966,11 +966,12 @@ exports.getGlobalAnalytics = async (req, res) => {
             sourceAnalysis[src].sourced++;
             positionPerf[reqId].sourced++;
 
-            // Scheduled Interview Count
-            const scheduledRounds = c.interviewRounds?.filter(r => r.status === 'Scheduled');
-            if (scheduledRounds?.length > 0) {
+            // Ongoing/Completed Interview Count (Scheduled, Passed, Failed)
+            const interviewStatuses = ['Scheduled', 'Passed', 'Failed'];
+            const relevantRounds = c.interviewRounds?.filter(r => interviewStatuses.includes(r.status));
+            if (relevantRounds?.length > 0) {
                 if (phase && phase !== 'all') {
-                    if (scheduledRounds.some(r => r.phase === parseInt(phase))) {
+                    if (relevantRounds.some(r => r.phase === parseInt(phase))) {
                         interviewsScheduled++;
                     }
                 } else {
@@ -1074,7 +1075,7 @@ exports.getGlobalAnalytics = async (req, res) => {
             displayMetrics = {
                 ...displayMetrics,
                 totalSourced: activeCandidates.length,
-                interviewsScheduled: activeCandidates.filter(c => c.interviewRounds?.some(r => r.phase === 1 && r.status === 'Scheduled')).length,
+                interviewsScheduled: activeCandidates.filter(c => c.interviewRounds?.some(r => r.phase === 1 && ['Scheduled', 'Passed', 'Failed'].includes(r.status))).length,
                 ph1Shortlisted,
                 conversionRate: activeCandidates.length > 0 ? ((ph1Shortlisted / activeCandidates.length) * 100).toFixed(1) : 0
             };
@@ -1084,7 +1085,7 @@ exports.getGlobalAnalytics = async (req, res) => {
             displayMetrics = {
                 ...displayMetrics,
                 totalSourced: ph1Selected,
-                interviewsScheduled: activeCandidates.filter(c => c.interviewRounds?.some(r => r.phase === 2 && r.status === 'Scheduled')).length,
+                interviewsScheduled: activeCandidates.filter(c => c.interviewRounds?.some(r => r.phase === 2 && ['Scheduled', 'Passed', 'Failed'].includes(r.status))).length,
                 ph2Selected,
                 conversionRate: ph1Selected > 0 ? ((ph2Selected / ph1Selected) * 100).toFixed(1) : 0
             };
