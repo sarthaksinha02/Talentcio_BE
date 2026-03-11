@@ -1005,8 +1005,14 @@ exports.getGlobalAnalytics = async (req, res) => {
                 }
             }
 
-            // Progression tracking
-            if (c.status === 'Pre-Screened' || c.decision !== 'None' || c.phase2Decision !== 'None') {
+            // Progression tracking: A candidate is 'Screened' if they move past the initial state
+            if (
+                c.status !== 'Interested' || 
+                c.decision !== 'None' || 
+                c.phase2Decision !== 'None' || 
+                c.phase3Decision !== 'None' ||
+                c.interviewRounds?.length > 0
+            ) {
                 funnel.screened++;
             }
 
