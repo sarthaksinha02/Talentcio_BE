@@ -767,31 +767,12 @@ exports.getClientAnalytics = async (req, res) => {
         };
 
         // Deduplicate and process candidates (keep highest achieved status)
-        const candidateMap = new Map(); // email -> candidateObject
-
-        const getStatusWeight = (c) => {
-            if (c.phase3Decision === 'Joined' && c.phase2Decision === 'Selected') return 100;
-            if (['Offer Sent', 'Offer Accepted'].includes(c.phase3Decision)) return 90;
-            if (c.phase2Decision === 'Selected') return 80;
-            if (c.phase2Decision === 'Shortlisted') return 70;
-            if (c.decision === 'Shortlisted') return 60;
-            if (c.status === 'Pre-Screened') return 50;
-            if (['Interested', 'In Interview'].includes(c.status)) return 40;
-            return 0;
-        };
-
-        candidates.forEach(c => {
-            if (c.status === 'Not Relevant') return;
-            const existing = candidateMap.get(c.email);
-            if (!existing || getStatusWeight(c) > getStatusWeight(existing)) {
-                candidateMap.set(c.email, c);
-            }
-        });
-
-        const uniqueCandidates = Array.from(candidateMap.values());
+        // Note: For "Total Sourced", we now count all unique candidate-requisition pairs
+        // reflecting the total volume of sourcing work.
+        const activeCandidates = candidates;
         let totalHired = 0;
 
-        uniqueCandidates.forEach(c => {
+        activeCandidates.forEach(c => {
             // Drop-offs first
             if (
                 c.decision === 'Rejected' || 
@@ -863,7 +844,7 @@ exports.getClientAnalytics = async (req, res) => {
                 activeReqs,
                 closedReqs,
                 totalOpenPositions,
-                totalSourced: uniqueCandidates.length,
+                totalSourced: activeCandidates.length,
                 pipeline: pipelineStages,
                 hiringRatio: Number(hiringRatio),
                 requisitionsList
@@ -925,32 +906,13 @@ exports.getGlobalAnalytics = async (req, res) => {
             .populate('hiringRequestId', 'client roleDetails.title roleDetails.department status createdAt closedAt')
             .lean();
 
-        const candidateMap = new Map();
-        const getStatusWeight = (c) => {
-            if (c.phase3Decision === 'Joined' && c.phase2Decision === 'Selected') return 100;
-            if (['Offer Sent', 'Offer Accepted'].includes(c.phase3Decision)) return 90;
-            if (c.phase2Decision === 'Selected') return 80;
-            if (c.phase2Decision === 'Shortlisted') return 70;
-            if (c.decision === 'Shortlisted') return 60;
-            if (c.status === 'Pre-Screened') return 50;
-            return 40;
-        };
-
-        candidates.forEach(c => {
-            if (c.status === 'Not Relevant') return;
-            const existing = candidateMap.get(c.email);
-            if (!existing || getStatusWeight(c) > getStatusWeight(existing)) {
-                candidateMap.set(c.email, c);
-            }
-        });
-
-        const activeCandidates = Array.from(candidateMap.values());
+        const activeCandidates = candidates;
         
         // Metrics containers
         let totalOpenPositions = 0;
         hiringRequests.forEach(hr => {
             if (hr.status !== 'Closed') {
-                totalOpenPositions += (hr.hiringDetails?.numberOfPositions || 1);
+                totalOpenPositions += (hr.hiringDetails?.openPositions || 1);
             }
         });
 
