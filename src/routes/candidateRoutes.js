@@ -39,4 +39,9 @@ router.put('/:id/rounds/:roundId', protect, authorize('ta.edit'), candidateContr
 router.delete('/:id/rounds/:roundId', protect, authorize('ta.delete'), candidateController.deleteInterviewRound);
 router.patch('/:id/rounds/:roundId/evaluate', protect, candidateController.evaluateInterviewRound);
 
+// Skill Ratings
+router.put('/:id/skill-ratings', protect, authorize('ta.edit'), candidateController.updateSkillRatings);
+router.post('/:id/skill-ratings', protect, authorize('ta.edit'), candidateController.addSkillRating);
+router.delete('/:id/skill-ratings/:skillId', protect, authorize('ta.edit'), candidateController.deleteSkillRating);
+
 module.exports = router;

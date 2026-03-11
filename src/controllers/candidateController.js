@@ -272,17 +272,46 @@ exports.getCandidateById = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const candidate = await Candidate.findById(id)
+        let candidateData = await Candidate.findById(id)
             .populate('uploadedBy', 'firstName lastName email')
-            .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('hiringRequestId', 'requestId roleDetails requirements')
             .populate('statusHistory.changedBy', 'firstName lastName')
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName')
             .lean();
 
-        if (!candidate) {
+        if (!candidateData) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
+
+        // Sync skillRatings from HiringRequest requirements (Smart Sync)
+        if (candidateData.hiringRequestId?.requirements) {
+            const hrr = candidateData.hiringRequestId.requirements;
+            const currentRatings = candidateData.skillRatings || [];
+            let hasChanges = false;
+
+            // Helper to add missing skills
+            const syncSkills = (skills, category) => {
+                if (!skills || !Array.isArray(skills)) return;
+                skills.forEach(s => {
+                    const exists = currentRatings.some(sr => sr.skill.toLowerCase() === s.toLowerCase());
+                    if (!exists) {
+                        currentRatings.push({ skill: s, rating: 0, category });
+                        hasChanges = true;
+                    }
+                });
+            };
+
+            syncSkills(hrr.mustHaveSkills, 'Must-Have');
+            syncSkills(hrr.niceToHaveSkills, 'Nice-To-Have');
+
+            if (hasChanges) {
+                await Candidate.findByIdAndUpdate(id, { $set: { skillRatings: currentRatings } });
+                candidateData.skillRatings = currentRatings;
+            }
+        }
+
+        const candidate = candidateData;
 
         // Verify if user has access to see this candidate
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
@@ -839,7 +868,7 @@ exports.getCandidatesByPulledBy = async (req, res) => {
 exports.evaluateInterviewRound = async (req, res) => {
     try {
         const { id, roundId } = req.params;
-        const { status, feedback, rating } = req.body; // status: 'Passed' or 'Failed'; rating: 1-10 (for Passed)
+        const { status, feedback, rating, skillRatings } = req.body; // status: 'Passed' or 'Failed'; rating: 1-10 (for Passed)
 
         if (!['Passed', 'Failed'].includes(status)) {
             return res.status(400).json({ message: 'Status must be Passed or Failed' });
@@ -883,6 +912,29 @@ exports.evaluateInterviewRound = async (req, res) => {
             round.rating = undefined; // Clear rating if changed to Failed
         }
 
+        // Save round-specific skill ratings and update global ones
+        if (skillRatings && Array.isArray(skillRatings)) {
+            round.skillRatings = skillRatings.map(sr => ({
+                skill: sr.skill,
+                rating: sr.rating,
+                category: sr.category
+            }));
+
+            // Sync to global skillRatings
+            skillRatings.forEach(newSr => {
+                const globalSrIndex = candidate.skillRatings.findIndex(s => s.skill === newSr.skill);
+                if (globalSrIndex !== -1) {
+                    candidate.skillRatings[globalSrIndex].rating = newSr.rating;
+                } else {
+                    candidate.skillRatings.push({
+                        skill: newSr.skill,
+                        rating: newSr.rating,
+                        category: newSr.category || 'Additional'
+                    });
+                }
+            });
+        }
+
         await candidate.save();
 
         const updatedCandidate = await Candidate.findById(id)
@@ -897,5 +949,91 @@ exports.evaluateInterviewRound = async (req, res) => {
     } catch (error) {
         console.error('Error evaluating interview round:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// --- SKILL RATINGS MANAGEMENT ---
+
+// Update all skill ratings for a candidate
+exports.updateSkillRatings = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { skillRatings } = req.body; // Expecting an array of { skill, rating, category, _id }
+
+        if (!Array.isArray(skillRatings)) {
+            return res.status(400).json({ message: 'Skill ratings must be an array' });
+        }
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        candidate.skillRatings = skillRatings;
+        await candidate.save();
+
+        res.status(200).json({
+            message: 'Skill ratings updated successfully',
+            skillRatings: candidate.skillRatings
+        });
+    } catch (error) {
+        console.error('Error updating skill ratings:', error);
+        res.status(500).json({ message: 'Server error updating skill ratings', error: error.message });
+    }
+};
+
+// Add a new skill to candidate's skillRatings
+exports.addSkillRating = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { skill, rating, category } = req.body;
+
+        if (!skill) {
+            return res.status(400).json({ message: 'Skill name is required' });
+        }
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        candidate.skillRatings.push({
+            skill,
+            rating: rating || 0,
+            category: category || 'Additional'
+        });
+
+        await candidate.save();
+
+        res.status(200).json({
+            message: 'Skill added successfully',
+            skillRatings: candidate.skillRatings
+        });
+    } catch (error) {
+        console.error('Error adding skill rating:', error);
+        res.status(500).json({ message: 'Server error adding skill rating', error: error.message });
+    }
+};
+
+// Delete a skill from candidate's skillRatings
+exports.deleteSkillRating = async (req, res) => {
+    try {
+        const { id, skillId } = req.params;
+
+        const candidate = await Candidate.findById(id);
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        candidate.skillRatings.pull(skillId);
+        await candidate.save();
+
+        res.status(200).json({
+            message: 'Skill deleted successfully',
+            skillRatings: candidate.skillRatings
+        });
+    } catch (error) {
+        console.error('Error deleting skill rating:', error);
+        res.status(500).json({ message: 'Server error deleting skill rating', error: error.message });
     }
 };

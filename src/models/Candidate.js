@@ -191,7 +191,12 @@ const candidateSchema = new mongoose.Schema({
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User'
         },
-        evaluatedAt: Date
+        evaluatedAt: Date,
+        skillRatings: [{
+            skill: { type: String, required: true },
+            rating: { type: Number, min: 0, max: 10, default: 0 },
+            category: { type: String, enum: ['Must-Have', 'Nice-To-Have', 'Additional'], default: 'Additional' }
+        }]
     }],
 
     // Hiring Decision
@@ -227,7 +232,14 @@ const candidateSchema = new mongoose.Schema({
 
     // Tracking Reopened Candidates
     isTransferred: { type: Boolean, default: false },
-    transferredFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' }
+    transferredFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' },
+
+    // Skill Ratings
+    skillRatings: [{
+        skill: { type: String, required: true },
+        rating: { type: Number, min: 0, max: 10, default: 0 },
+        category: { type: String, enum: ['Must-Have', 'Nice-To-Have', 'Additional'], default: 'Additional' }
+    }]
 }, {
     timestamps: true
 });
