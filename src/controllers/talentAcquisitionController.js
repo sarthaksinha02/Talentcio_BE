@@ -775,9 +775,9 @@ exports.getClientAnalytics = async (req, res) => {
         activeCandidates.forEach(c => {
             // Drop-offs first
             if (
-                c.decision === 'Rejected' || 
-                c.phase2Decision === 'Rejected' || 
-                c.phase3Decision === 'No Show' || 
+                c.decision === 'Rejected' ||
+                c.phase2Decision === 'Rejected' ||
+                c.phase3Decision === 'No Show' ||
                 c.phase3Decision === 'Offer Declined' ||
                 c.status === 'Not Interested' ||
                 c.status === 'Not Picking'
@@ -924,13 +924,13 @@ exports.getGlobalAnalytics = async (req, res) => {
         }
 
         const activeCandidates = filteredCandidates;
-        
+
         // Identify active hiring requests after filtering candidates
         // This ensures stats like "Total Requisitions" match the filtered candidate activity
         const activeHrIds = [...new Set(activeCandidates.map(c => c.hiringRequestId?._id?.toString()).filter(Boolean))];
         const activeHrSet = new Set(activeHrIds);
-        
-        const filteredHiringRequests = (startDate || endDate || recruiter) 
+
+        const filteredHiringRequests = (startDate || endDate || recruiter)
             ? hiringRequests.filter(hr => activeHrSet.has(hr._id.toString()))
             : hiringRequests;
 
@@ -1007,9 +1007,9 @@ exports.getGlobalAnalytics = async (req, res) => {
 
             // Progression tracking: A candidate is 'Screened' if they move past the initial state
             if (
-                c.status !== 'Interested' || 
-                c.decision !== 'None' || 
-                c.phase2Decision !== 'None' || 
+                c.status !== 'Interested' ||
+                c.decision !== 'None' ||
+                c.phase2Decision !== 'None' ||
                 c.phase3Decision !== 'None' ||
                 c.interviewRounds?.length > 0
             ) {
