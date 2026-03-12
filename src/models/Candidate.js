@@ -141,14 +141,14 @@ const candidateSchema = new mongoose.Schema({
     // Status Tracking
     status: {
         type: String,
-        enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'Pre-Screened', 'In Interview'],
+        enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'In Interview'],
         required: true,
         default: 'Interested'
     },
     statusHistory: [{
         status: {
             type: String,
-            enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'Pre-Screened', 'In Interview'],
+            enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'In Interview'],
         },
         changedBy: {
             type: mongoose.Schema.Types.ObjectId,

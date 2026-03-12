@@ -723,7 +723,6 @@ exports.getClientAnalytics = async (req, res) => {
                     totalOpenPositions: 0,
                     pipeline: {
                         'Sourced': 0,
-                        'Pre-Screened': 0,
                         'In Interviews': 0,
                         'Hired': 0,
                         'Rejected': 0,
@@ -755,7 +754,6 @@ exports.getClientAnalytics = async (req, res) => {
 
         const pipelineStages = {
             'Sourced': 0,
-            'Pre-Screened': 0,
             'Phase 1 Shortlisted': 0,
             'Phase 2 Shortlisted': 0,
             'Phase 2 Selected': 0,
@@ -824,11 +822,6 @@ exports.getClientAnalytics = async (req, res) => {
             // Phase 1
             if (c.decision === 'Shortlisted') {
                 pipelineStages['Phase 1 Shortlisted']++;
-                return;
-            }
-
-            if (c.status === 'Pre-Screened') {
-                pipelineStages['Pre-Screened']++;
                 return;
             }
 
@@ -942,8 +935,8 @@ exports.getGlobalAnalytics = async (req, res) => {
             }
         });
 
-        const pipeline = { 'Sourced': 0, 'Pre-Screened': 0, 'Ph 1 Shortlisted': 0, 'Ph 2 Shortlisted': 0, 'Final Selection': 0, 'Offer Released': 0, 'Joined': 0 };
-        const funnel = { screened: 0, interview: 0, offer: 0 };
+        const pipeline = { 'Sourced': 0, 'Ph 1 Shortlisted': 0, 'Ph 2 Shortlisted': 0, 'Final Selection': 0, 'Offer Released': 0, 'Joined': 0 };
+        const funnel = { interested: 0, interview: 0, offer: 0 };
         const deptAnalysis = {};
         const clientAnalysis = {};
         const recruiterPerf = {};
@@ -1005,15 +998,9 @@ exports.getGlobalAnalytics = async (req, res) => {
                 }
             }
 
-            // Progression tracking: A candidate is 'Screened' if they move past the initial state
-            if (
-                c.status !== 'Interested' ||
-                c.decision !== 'None' ||
-                c.phase2Decision !== 'None' ||
-                c.phase3Decision !== 'None' ||
-                c.interviewRounds?.length > 0
-            ) {
-                funnel.screened++;
+            // Interested Stage: Anyone who entered the process and isn't explicitly disqualified/not interested
+            if (!['Not Interested', 'Not Relevant', 'Not Picking'].includes(c.status)) {
+                funnel.interested++;
             }
 
             if (c.interviewRounds?.length > 0) {
@@ -1037,7 +1024,6 @@ exports.getGlobalAnalytics = async (req, res) => {
             else if (c.phase2Decision === 'Selected') pipeline['Final Selection']++;
             else if (c.phase2Decision === 'Shortlisted') pipeline['Ph 2 Shortlisted']++;
             else if (c.decision === 'Shortlisted') pipeline['Ph 1 Shortlisted']++;
-            else if (c.status === 'Pre-Screened') pipeline['Pre-Screened']++;
             else pipeline['Sourced']++;
 
             if (['Offer Sent', 'Offer Accepted', 'Joined'].includes(c.phase3Decision) && c.phase2Decision === 'Selected') {
@@ -1156,7 +1142,7 @@ exports.getGlobalAnalytics = async (req, res) => {
                 })).filter(d => d.value > 0),
                 recruitmentFunnel: [
                     { name: 'Sourced', value: activeCandidates.length },
-                    { name: 'Screened', value: funnel.screened },
+                    { name: 'Interested', value: funnel.interested },
                     { name: 'Interview', value: funnel.interview },
                     { name: 'Offer', value: funnel.offer },
                     { name: 'Joined', value: totalJoined }
