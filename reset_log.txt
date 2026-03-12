@@ -1,3 +1,0 @@
-Reset Script started
-MongoDB Connected: localhost
-Password for admin@gmail.com has been reset to Admin@123

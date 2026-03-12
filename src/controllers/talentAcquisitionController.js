@@ -711,7 +711,14 @@ exports.getClientAnalytics = async (req, res) => {
 
         const hiringRequests = await HiringRequest.find(hrQuery).lean();
 
-        const requisitionsList = allClientReqs.map(hr => ({ id: hr._id, title: hr.roleDetails.title, status: hr.status }));
+        const requisitionsList = allClientReqs.map(hr => ({ 
+            _id: hr._id, 
+            title: hr.roleDetails?.title, 
+            status: hr.status,
+            createdAt: hr.createdAt,
+            closedAt: hr.closedAt,
+            client: hr.client
+        }));
 
         if (!hiringRequests || hiringRequests.length === 0) {
             return res.status(200).json({
@@ -768,6 +775,7 @@ exports.getClientAnalytics = async (req, res) => {
         // Note: For "Total Sourced", we now count all unique candidate-requisition pairs
         // reflecting the total volume of sourcing work.
         const activeCandidates = candidates;
+        const uniqueCandidates = [...new Map(activeCandidates.map(c => [c.email, c])).values()];
         let totalHired = 0;
 
         activeCandidates.forEach(c => {
@@ -855,7 +863,7 @@ exports.getClientAnalytics = async (req, res) => {
 // --- Global Analytics ---
 exports.getGlobalAnalytics = async (req, res) => {
     try {
-        const { client, department, position, recruiter, startDate, endDate, phase } = req.query;
+        const { client, department, position, recruiter, startDate, endDate, phase, requisitionId } = req.query;
 
         // Visibility permissions
         const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.name === 'HR' || r.name === 'Super Admin');
@@ -882,7 +890,21 @@ exports.getGlobalAnalytics = async (req, res) => {
         if (department) hrQuery['roleDetails.department'] = new RegExp(department, 'i');
         if (position) hrQuery['roleDetails.title'] = new RegExp(position, 'i');
 
-        const hiringRequests = await HiringRequest.find(hrQuery).select('_id roleDetails.department roleDetails.title client hiringDetails status createdAt closedAt').lean();
+        const allHiringRequests = await HiringRequest.find(hrQuery).select('_id roleDetails.department roleDetails.title client hiringDetails status createdAt closedAt').lean();
+        
+        const requisitionsList = allHiringRequests.map(hr => ({
+            _id: hr._id,
+            title: hr.roleDetails?.title,
+            status: hr.status,
+            createdAt: hr.createdAt,
+            closedAt: hr.closedAt,
+            client: hr.client
+        }));
+
+        const hiringRequests = requisitionId 
+            ? allHiringRequests.filter(hr => hr._id.toString() === requisitionId)
+            : allHiringRequests;
+
         const hrIds = hiringRequests.map(hr => hr._id);
 
         let candidateQuery = { hiringRequestId: { $in: hrIds } };
@@ -1126,10 +1148,11 @@ exports.getGlobalAnalytics = async (req, res) => {
         }));
 
         const filterOptions = {
-            clients: [...new Set(hiringRequests.map(hr => hr.client).filter(Boolean))].sort(),
-            departments: [...new Set(hiringRequests.map(hr => hr.roleDetails?.department).filter(Boolean))].sort(),
-            positions: [...new Set(hiringRequests.map(hr => hr.roleDetails?.title).filter(Boolean))].sort(),
-            recruiters: [...new Set(candidates.map(c => getCandidateRecruiterName(c)).filter(Boolean))].sort()
+            clients: [...new Set(allHiringRequests.map(hr => hr.client).filter(Boolean))].sort(),
+            departments: [...new Set(allHiringRequests.map(hr => hr.roleDetails?.department).filter(Boolean))].sort(),
+            positions: [...new Set(allHiringRequests.map(hr => hr.roleDetails?.title).filter(Boolean))].sort(),
+            recruiters: [...new Set(candidates.map(c => getCandidateRecruiterName(c)).filter(Boolean))].sort(),
+            requisitions: requisitionsList
         };
 
         res.status(200).json({
