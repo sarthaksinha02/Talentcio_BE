@@ -3,6 +3,8 @@ const ApprovalWorkflow = require('../models/ApprovalWorkflow');
 const User = require('../models/User');
 const Candidate = require('../models/Candidate');
 const mongoose = require('mongoose');
+const NotificationService = require('../services/notificationService');
+
 
 // Helper to generate Request ID (e.g., HRR-2023-001)
 const generateRequestId = async () => {
@@ -68,7 +70,7 @@ exports.createHiringRequest = async (req, res) => {
                 // Notify first level approvers
                 const currentStep = approvals[0];
                 if (currentStep && currentStep.approvers && currentStep.approvers.length > 0) {
-                    const Notification = require('../models/Notification');
+                    const io = req.app.get('io');
                     const notifications = currentStep.approvers.map(approverId => ({
                         user: approverId,
                         title: 'New Hiring Request Approval',
@@ -76,7 +78,7 @@ exports.createHiringRequest = async (req, res) => {
                         type: 'Approval',
                         link: `/ta/hiring-request/${newRequest._id}/details`
                     }));
-                    await Notification.insertMany(notifications);
+                    await NotificationService.createManyNotifications(io, notifications);
                 }
             } else {
                 newRequest.status = 'Pending_L1'; // Legacy workflow
@@ -389,7 +391,7 @@ exports.approveHiringRequest = async (req, res) => {
                 // Notify next level approvers
                 const nextStep = request.approvalChain[request.currentApprovalLevel - 1];
                 if (nextStep && nextStep.approvers && nextStep.approvers.length > 0) {
-                    const Notification = require('../models/Notification');
+                    const io = req.app.get('io');
                     const notifications = nextStep.approvers.map(approverId => ({
                         user: approverId,
                         title: 'Hiring Request Approval Pending',
@@ -397,7 +399,7 @@ exports.approveHiringRequest = async (req, res) => {
                         type: 'Approval',
                         link: `/ta/hiring-request/${request._id}/details`
                     }));
-                    await Notification.insertMany(notifications);
+                    await NotificationService.createManyNotifications(io, notifications);
                 }
             } else {
                 // All levels approved
@@ -405,8 +407,8 @@ exports.approveHiringRequest = async (req, res) => {
 
                 // Notify creator that it is fully approved
                 if (request.createdBy) {
-                    const Notification = require('../models/Notification');
-                    await Notification.create({
+                    const io = req.app.get('io');
+                    await NotificationService.createNotification(io, {
                         user: request.createdBy,
                         title: 'Hiring Request Approved',
                         message: `Your Hiring Request ${request.requestId} for ${request.roleDetails.title} has been fully approved.`,
@@ -433,8 +435,8 @@ exports.approveHiringRequest = async (req, res) => {
 
                 // Notify creator
                 if (request.createdBy) {
-                    const Notification = require('../models/Notification');
-                    await Notification.create({
+                    const io = req.app.get('io');
+                    await NotificationService.createNotification(io, {
                         user: request.createdBy,
                         title: 'Hiring Request Approved',
                         message: `Your Hiring Request ${request.requestId} has been fully approved.`,

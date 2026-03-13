@@ -39,6 +39,8 @@ const leaveBalanceSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+// Performance Indexes
+leaveBalanceSchema.index({ user: 1, year: 1 });
 // Compound index to ensure one balance record per type per user per year
 leaveBalanceSchema.index({ user: 1, leaveType: 1, year: 1 }, { unique: true });
 

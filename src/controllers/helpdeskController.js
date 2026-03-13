@@ -1,6 +1,8 @@
 const HelpdeskQuery = require('../models/HelpdeskQuery');
 const QueryType = require('../models/QueryType');
 const User = require('../models/User');
+const NotificationService = require('../services/notificationService');
+
 
 // === QUERY TYPE MANAGEMENT ===
 
@@ -105,8 +107,8 @@ exports.createQuery = async (req, res) => {
         await newQuery.save();
 
         if (qType.assignedPerson) {
-            const Notification = require('../models/Notification');
-            await Notification.create({
+            const io = req.app.get('io');
+            await NotificationService.createNotification(io, {
                 user: qType.assignedPerson,
                 title: 'New Helpdesk Query',
                 message: `You have been assigned a new ${priority || 'Medium'} priority query: "${subject}"`,
@@ -156,14 +158,15 @@ exports.getAssignedQueries = async (req, res) => {
 
 exports.getAllQueries = async (req, res) => {
     try {
-        const isAdmin = req.user.roles.some(r => r.name === 'Admin' || r.isSystem === true);
+        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
         if (!isAdmin) return res.status(403).json({ success: false, message: 'Admins only' });
 
         const queries = await HelpdeskQuery.find()
             .populate('raisedBy', 'firstName lastName email')
             .populate('assignedTo', 'firstName lastName email')
             .populate('queryType', 'name')
-            .sort({ priority: -1, createdAt: -1 });
+            .sort({ priority: -1, createdAt: -1 })
+            .lean();
 
         res.status(200).json({ success: true, data: queries });
     } catch (error) {
@@ -174,14 +177,15 @@ exports.getAllQueries = async (req, res) => {
 
 exports.getEscalatedQueries = async (req, res) => {
     try {
-        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
         if (!isAdmin) return res.status(403).json({ success: false, message: 'Admins only' });
 
         const queries = await HelpdeskQuery.find({ status: 'Escalated' })
             .populate('raisedBy', 'firstName lastName email')
             .populate('assignedTo', 'firstName lastName email')
             .populate('queryType', 'name')
-            .sort({ escalatedAt: -1 });
+            .sort({ escalatedAt: -1 })
+            .lean();
 
         res.status(200).json({ success: true, data: queries });
     } catch (error) {
@@ -209,6 +213,14 @@ exports.getQueryById = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Query not found' });
         }
 
+        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
+        const isAssignee = query.assignedTo?._id?.toString() === req.user._id.toString() || query.assignedTo?.toString() === req.user._id.toString();
+        const isRaiser = query.raisedBy?._id?.toString() === req.user._id.toString() || query.raisedBy?.toString() === req.user._id.toString();
+
+        if (!isAdmin && !isAssignee && !isRaiser) {
+            return res.status(403).json({ success: false, message: 'Unauthorized to view this query.' });
+        }
+
         res.status(200).json({ success: true, data: query });
     } catch (error) {
         console.error('Error fetching query:', error);
@@ -218,28 +230,75 @@ exports.getQueryById = async (req, res) => {
 
 exports.updateQueryStatus = async (req, res) => {
     try {
-        const query = await HelpdeskQuery.findById(req.params.id);
+        const { status } = req.body;
+        const query = await HelpdeskQuery.findById(req.params.id).populate('queryType');
 
         if (!query) {
             return res.status(404).json({ success: false, message: 'Query not found' });
         }
 
-        // Only assignee or admin can close
-        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
-        const isAssignee = query.assignedTo.toString() === req.user._id.toString();
+        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
+        const isAssignee = query.assignedTo?.toString() === req.user._id.toString();
+        const isRaiser = query.raisedBy?.toString() === req.user._id.toString();
 
-        if (!isAdmin && !isAssignee) {
-            return res.status(403).json({ success: false, message: 'Only the assigned person or admin can close this query.' });
+        // Security logic based on target status
+        if (status === 'Closed') {
+            if (!isAdmin && !isAssignee && !isRaiser) {
+                return res.status(403).json({ success: false, message: 'Unauthorized to close this query.' });
+            }
+            query.closedAt = Date.now();
+        } else if (status === 'In Progress' || status === 'Pending') {
+            if (!isAdmin && !isAssignee) {
+                return res.status(403).json({ success: false, message: 'Only assignee or admin can change status to ' + status });
+            }
+        } else if (status === 'Escalated') {
+            if (!isAdmin && !isRaiser && !isAssignee) {
+                return res.status(403).json({ success: false, message: 'Unauthorized to escalate.' });
+            }
+            if (!query.escalatedAt) query.escalatedAt = Date.now();
+            
+            // Manual Reassignment logic (mirroring cron behavior)
+            const qType = query.queryType;
+            if (qType && qType.enableEscalation && qType.escalationPerson) {
+                const oldAssignee = query.assignedTo;
+                const newAssignee = qType.escalationPerson;
+                
+                if (newAssignee.toString() !== (oldAssignee?._id?.toString() || oldAssignee?.toString())) {
+                    query.assignedTo = newAssignee;
+                    
+                    // Notify the new assignee specifically
+                    const io = req.app.get('io');
+                    await NotificationService.createNotification(io, {
+                        user: newAssignee,
+                        title: 'Manual Escalation Assigned',
+                        message: `An escalated query "${query.subject}" has been assigned to you.`,
+                        type: 'Alert',
+                        link: `/helpdesk/${query._id}`
+                    });
+                }
+            }
+        } else {
+            return res.status(400).json({ success: false, message: 'Invalid status transition.' });
         }
 
-        query.status = 'Closed';
-        query.closedAt = Date.now();
-
+        query.status = status;
         await query.save();
+
+        // Notify User if status changed by someone else
+        if (req.user._id.toString() !== query.raisedBy?.toString()) {
+            const io = req.app.get('io');
+            await NotificationService.createNotification(io, {
+                user: query.raisedBy,
+                title: 'Helpdesk Query Updated',
+                message: `Your helpdesk query "${query.subject}" status is now ${status}.`,
+                type: 'Info',
+                link: `/helpdesk/${query._id}`
+            });
+        }
 
         res.status(200).json({ success: true, data: query });
     } catch (error) {
-        console.error('Error returning query:', error);
+        console.error('Error updating query status:', error);
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
@@ -254,8 +313,19 @@ exports.addComment = async (req, res) => {
 
         if (!query) return res.status(404).json({ success: false, message: 'Query not found' });
 
-        // If it's the first time assigned person is responding, move it to In Progress
-        if (query.status === 'New' && query.assignedTo.toString() === req.user._id.toString()) {
+        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
+        const isAssignee = query.assignedTo?.toString() === req.user._id.toString();
+        const isRaiser = query.raisedBy?.toString() === req.user._id.toString();
+
+        if (!isAdmin && !isAssignee && !isRaiser) {
+            return res.status(403).json({ success: false, message: 'Unauthorized to comment on this query.' });
+        }
+
+        // Status Transition Logic
+        if (query.status === 'New' && (isAssignee || isAdmin)) {
+            query.status = 'In Progress';
+        } else if (query.status === 'Pending' && isRaiser) {
+            // Raiser replied to a pending request
             query.status = 'In Progress';
         }
 
@@ -271,6 +341,18 @@ exports.addComment = async (req, res) => {
         const io = req.app.get('io');
         if (io) {
             io.to(query._id.toString()).emit('new_comment', query.comments);
+        }
+
+        // Notify the other party
+        const notifyTarget = isRaiser ? query.assignedTo : query.raisedBy;
+        if (notifyTarget) {
+            await NotificationService.createNotification(io, {
+                user: notifyTarget,
+                title: 'New Comment on Query',
+                message: `${req.user.firstName} commented on "${query.subject}"`,
+                type: 'Info',
+                link: `/helpdesk/${query._id}`
+            });
         }
 
         res.status(200).json({ success: true, data: query });

@@ -3,6 +3,8 @@ const { HiringRequest } = require('../models/HiringRequest');
 const { cloudinary } = require('../config/cloudinary');
 const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
 const mongoose = require('mongoose');
+const NotificationService = require('../services/notificationService');
+
 
 // Upload resume to Cloudinary
 exports.uploadResume = async (req, res) => {
@@ -685,9 +687,9 @@ exports.addInterviewRound = async (req, res) => {
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName');
 
-        // Create notification for assigned interviewers
+        // Create notification for assigned interviewers and emit real-time updates
         if (assignedTo && assignedTo.length > 0) {
-            const Notification = require('../models/Notification');
+            const io = req.app.get('io');
             const notifications = assignedTo.map(userId => ({
                 user: userId,
                 title: 'New Interview Assigned',
@@ -699,7 +701,16 @@ exports.addInterviewRound = async (req, res) => {
                     roundId: candidate.interviewRounds[candidate.interviewRounds.length - 1]._id
                 }
             }));
-            await Notification.insertMany(notifications);
+            await NotificationService.createManyNotifications(io, notifications);
+
+            // Also emit an 'interview_update' event to each assigned user to refresh their list
+            assignedTo.forEach(userId => {
+                NotificationService.emitToUser(io, userId, 'interview_update', {
+                    candidateId: candidate._id,
+                    candidateName: candidate.candidateName,
+                    roundId: candidate.interviewRounds[candidate.interviewRounds.length - 1]._id
+                });
+            });
         }
 
         res.status(201).json({
@@ -739,6 +750,20 @@ exports.updateInterviewRound = async (req, res) => {
         const updatedCandidate = await Candidate.findById(id)
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+
+        const io = req.app.get('io');
+        // Notify assigned interviewers about the update
+        if (updatedCandidate.interviewRounds.id(roundId).assignedTo) {
+            updatedCandidate.interviewRounds.id(roundId).assignedTo.forEach(user => {
+                const userId = user._id || user;
+                NotificationService.emitToUser(io, userId, 'interview_update', {
+                    candidateId: updatedCandidate._id,
+                    candidateName: updatedCandidate.candidateName,
+                    roundId: roundId,
+                    type: 'UPDATE'
+                });
+            });
+        }
 
         res.status(200).json({
             message: 'Interview round updated successfully',
@@ -940,6 +965,21 @@ exports.evaluateInterviewRound = async (req, res) => {
         const updatedCandidate = await Candidate.findById(id)
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+
+        const io = req.app.get('io');
+        // Notify assigned interviewers that the round is evaluated (to remove from their "Pending" list)
+        if (updatedCandidate.interviewRounds.id(roundId).assignedTo) {
+            updatedCandidate.interviewRounds.id(roundId).assignedTo.forEach(user => {
+                const userId = user._id || user;
+                NotificationService.emitToUser(io, userId, 'interview_update', {
+                    candidateId: updatedCandidate._id,
+                    candidateName: updatedCandidate.candidateName,
+                    roundId: roundId,
+                    type: 'EVALUATED',
+                    status: status
+                });
+            });
+        }
 
         res.status(200).json({
             message: `Round evaluated as ${status}`,

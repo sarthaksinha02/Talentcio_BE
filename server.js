@@ -23,6 +23,14 @@ app.set('io', io);
 io.on('connection', (socket) => {
     // console.log(`User connected to socket: ${socket.id}`);
 
+    // Join a private room for the user to receive targeted notifications
+    socket.on('join_user_room', (userId) => {
+        if (userId) {
+            socket.join(userId.toString());
+            // console.log(`Socket ${socket.id} joined personal room ${userId}`);
+        }
+    });
+
     // Join a specific query room for real-time ticket updates
     socket.on('join_query', (queryId) => {
         socket.join(queryId);
@@ -84,7 +92,7 @@ const discussionRoutes = require('./src/routes/discussionRoutes');
 const initServer = async () => {
     await connectDB();
     await syncPermissions();
-    startEscalationCron(); // Start the background Helpdesk escalation job
+    startEscalationCron(io); // Start the background Helpdesk escalation job
 };
 initServer();
 

@@ -3,6 +3,8 @@ const LeaveBalance = require('../models/LeaveBalance');
 const LeaveConfig = require('../models/LeaveConfig');
 const User = require('../models/User');
 const { calculateLeaveDays } = require('../utils/leaveUtils');
+const NotificationService = require('../services/notificationService');
+
 
 // Helper to initialize balance dynamically based on policy
 const initializeBalance = async (userId, policy, year) => {
@@ -141,7 +143,7 @@ const applyLeave = async (req, res) => {
         // Notify Managers
         const currentUser = await User.findById(userId).populate('reportingManagers');
         if (currentUser && currentUser.reportingManagers && currentUser.reportingManagers.length > 0) {
-            const Notification = require('../models/Notification');
+            const io = req.app.get('io');
             const notifications = currentUser.reportingManagers.map(manager => ({
                 user: manager._id,
                 title: 'New Leave Request',
@@ -149,7 +151,7 @@ const applyLeave = async (req, res) => {
                 type: 'Approval',
                 link: '/admin/leaves/requests'
             }));
-            await Notification.insertMany(notifications);
+            await NotificationService.createManyNotifications(io, notifications);
         }
 
         res.status(201).json(leaveRequest);
@@ -160,13 +162,34 @@ const applyLeave = async (req, res) => {
     }
 };
 
-// @desc    Get My Leave Requests
-// @route   GET /api/leaves/requests
+// @desc    Get My Leave Requests (Paginated)
+// @route   GET /api/leaves/requests?page=1&limit=10
 // @access  Private
 const getMyLeaves = async (req, res) => {
     try {
-        const leaves = await LeaveRequest.find({ user: req.user._id }).sort({ createdAt: -1 });
-        res.json(leaves);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        const [leaves, total] = await Promise.all([
+            LeaveRequest.find({ user: req.user._id })
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .select('leaveType startDate endDate isHalfDay reason status createdAt daysCount')
+                .lean(),
+            LeaveRequest.countDocuments({ user: req.user._id })
+        ]);
+
+        res.json({
+            data: leaves,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit)
+            }
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error' });
@@ -181,7 +204,7 @@ const getMyBalances = async (req, res) => {
         const year = new Date().getFullYear();
 
         // Start by getting all active policies
-        const allPolicies = await LeaveConfig.find({ isActive: true });
+        const allPolicies = await LeaveConfig.find({ isActive: true }).lean();
 
         // Filter policies based on user employment type (Strict Check)
         const userEmploymentType = req.user.employmentType || 'Full Time';
@@ -194,15 +217,14 @@ const getMyBalances = async (req, res) => {
         const balances = [];
 
         for (const policy of policies) {
-            let balance = await LeaveBalance.findOne({ user: req.user._id, leaveType: policy.leaveType, year });
+            let balance = await LeaveBalance.findOne({ user: req.user._id, leaveType: policy.leaveType, year }).lean();
 
             // If no balance record, initialize it based on the policy rules
             if (!balance) {
-                balance = await initializeBalance(req.user._id, policy, year);
-                balance = balance.toObject();
+                const newBalance = await initializeBalance(req.user._id, policy, year);
+                balance = newBalance.toObject();
             } else {
                 // Calculate virtual closing
-                balance = balance.toObject();
                 balance.closingBalance = balance.openingBalance + balance.accrued - balance.utilized;
             }
 
@@ -247,7 +269,9 @@ const getManagerApprovals = async (req, res) => {
 
         const requests = await LeaveRequest.find(query)
             .populate('user', 'firstName lastName email employeeCode')
-            .sort({ createdAt: 1 });
+            .sort({ createdAt: 1 })
+            .select('user leaveType startDate endDate daysCount reason status isHalfDay createdAt')
+            .lean();
 
         res.json(requests);
     } catch (error) {
@@ -321,8 +345,8 @@ const updateLeaveStatus = async (req, res) => {
         await request.save();
         
         // Notify Employee
-        const Notification = require('../models/Notification');
-        await Notification.create({
+        const io = req.app.get('io');
+        await NotificationService.createNotification(io, {
             user: request.user,
             title: `Leave Request ${status}`,
             message: `Your leave request for ${request.daysCount} days of ${request.leaveType} has been ${status.toLowerCase()}.`,

@@ -43,7 +43,7 @@ const helpdeskQuerySchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['New', 'In Progress', 'Closed', 'Escalated'],
+        enum: ['New', 'In Progress', 'Closed', 'Escalated', 'Pending'],
         default: 'New'
     },
     raisedBy: {
@@ -67,11 +67,19 @@ const helpdeskQuerySchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Pre-save hook to generate queryId
+// Indexes for performance
+helpdeskQuerySchema.index({ raisedBy: 1, createdAt: -1 });
+helpdeskQuerySchema.index({ assignedTo: 1, status: 1 });
+
+// Pre-save hook to generate robust queryId
 helpdeskQuerySchema.pre('validate', async function () {
     if (this.isNew && !this.queryId) {
-        const count = await this.constructor.countDocuments();
-        this.queryId = `HD-${1000 + count + 1}`;
+        // format: HD-DATE-RANDOM
+        // Date segment: last 6 digits of timestamp
+        // Random segment: 3 chars
+        const dateSegment = Date.now().toString().slice(-6);
+        const randomSegment = Math.random().toString(36).substring(2, 5).toUpperCase();
+        this.queryId = `HD-${dateSegment}-${randomSegment}`;
     }
 });
 
