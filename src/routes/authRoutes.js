@@ -13,10 +13,21 @@ router.post('/resend-otp', resendOtp);
 router.post('/upload-profile-picture', protect, upload.single('image'), uploadProfilePicture);
 router.get('/profile', protect, getMyself);
 router.get('/verify-workspace', (req, res) => {
+    // If req.company exists, it's a valid tenant.
+    // If not, but it reached here, it's the root domain (bypassed in tenantMiddleware).
     if (req.company) {
-        res.status(200).json({ valid: true, name: req.company.name });
+        res.status(200).json({
+            valid: true,
+            name: req.company.name,
+            type: 'tenant'
+        });
     } else {
-        res.status(404).json({ message: 'Workspace not found.' });
+        // Root domain access - allow the frontend to proceed to landing/login
+        res.status(200).json({
+            valid: true,
+            name: 'HRCODE',
+            type: 'root'
+        });
     }
 });
 
