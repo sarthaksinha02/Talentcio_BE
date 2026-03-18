@@ -35,15 +35,16 @@ async function migrate() {
         console.log('Connected to Database.');
 
         // 1. Create or Find the default company (Tenant)
-        const subdomain = "telentcio"; // Matches telentcio.vercel.app
-        let defaultCompany = await Company.findOne({ subdomain });
+        const targetSubdomain = "telentcio"; // Matches telentcio.vercel.app
+        const companyName = "ilumaa";
 
+        let defaultCompany = await Company.findOne({ subdomain: targetSubdomain });
 
         if (!defaultCompany) {
             defaultCompany = await Company.create({
-                name: "Primary Company",
-                subdomain: subdomain,
-                email: "admin@yourcompany.com",
+                name: companyName,
+                subdomain: targetSubdomain,
+                email: "admin@ilumaa.com",
                 status: "Active",
                 timezone: "Asia/Kolkata",
                 settings: {
@@ -52,6 +53,12 @@ async function migrate() {
             });
             console.log(`Created Default Company: ${defaultCompany.name} (ID: ${defaultCompany._id})`);
         } else {
+            // Update name to 'ilumaa' if it's currently 'Primary Company'
+            if (defaultCompany.name !== companyName) {
+                defaultCompany.name = companyName;
+                await defaultCompany.save();
+                console.log(`Renamed existing Company to: ${defaultCompany.name}`);
+            }
             console.log(`Using existing Company: ${defaultCompany.name} (ID: ${defaultCompany._id})`);
         }
 

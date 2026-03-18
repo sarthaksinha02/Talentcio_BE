@@ -128,7 +128,12 @@ const createCompany = async (req, res) => {
 // PUT /api/superadmin/companies/:id
 const updateCompany = async (req, res) => {
     try {
-        const company = await Company.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+        const updateData = { ...req.body };
+        if (updateData.planId === "") {
+            updateData.planId = null;
+        }
+
+        const company = await Company.findByIdAndUpdate(req.params.id, updateData, { new: true, runValidators: true });
         if (!company) return res.status(404).json({ message: 'Company not found' });
         await logActivity('COMPANY_UPDATED', 'Company', company._id, req.superAdmin, company._id, req.body);
         res.json(company);
