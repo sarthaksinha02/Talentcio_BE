@@ -7,13 +7,10 @@ const Company = require('../models/Company');
 const tenantMiddleware = async (req, res, next) => {
     try {
         const host = req.headers.host;
-        // 1. Prioritize header or query param (explicitly set by frontend)
-        const tenantHeader = req.headers['x-tenant-id'];
-        const tenantQuery = req.query.tenant;
-        subdomain = tenantHeader || tenantQuery;
+        let subdomain = '';
 
-        // 2. Fallback to host-based extraction (useful for local dev or same-domain setups)
-        if (!subdomain && host) {
+        // 1. Detect subdomain from host (Priority 1 - Source of Truth)
+        if (host) {
             const domain = host.split(':')[0];
             const parts = domain.split('.');
 
@@ -22,7 +19,7 @@ const tenantMiddleware = async (req, res, next) => {
                     subdomain = parts[0];
                 }
             } else if (parts.length > 2) {
-                // Ignore subdomains if they belong to known cloud hosting providers
+                // Ignore subdomains of cloud providers
                 const cloudProviders = ['render.com', 'onrender.com', 'vercel.app', 'herokuapp.com'];
                 const isCloudDomain = cloudProviders.some(p => domain.endsWith(p));
                 
@@ -30,6 +27,13 @@ const tenantMiddleware = async (req, res, next) => {
                     subdomain = parts[0];
                 }
             }
+        }
+
+        // 2. Fallback to header or query param (Only if no host subdomain was detected)
+        if (!subdomain || subdomain === 'www' || subdomain === 'api') {
+            const tenantHeader = req.headers['x-tenant-id'];
+            const tenantQuery = req.query.tenant;
+            subdomain = tenantHeader || tenantQuery;
         }
 
         // If no subdomain is found, we might be hitting the landing page or a global route
