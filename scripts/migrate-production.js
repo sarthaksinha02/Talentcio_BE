@@ -77,6 +77,24 @@ async function migrate() {
         }
 
         const defaultCompany = attachedCompany;
+ 
+        // 4. Seed Default Leave Policies for this company if none exist
+        console.log('\n--- Seeding Default Leave Policies ---');
+        const defaults = [
+            { leaveType: 'CL', name: 'Casual Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1, maxLimitPerYear: 12, carryForward: false },
+            { leaveType: 'SL', name: 'Sick Leave', isPaid: true, accrualType: 'Yearly', accrualAmount: 8, maxLimitPerYear: 8, carryForward: false },
+            { leaveType: 'EL', name: 'Earned Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1.25, maxLimitPerYear: 15, carryForward: true, maxCarryForward: 30 },
+            { leaveType: 'LOP', name: 'Loss of Pay', isPaid: false, accrualType: 'None', maxLimitPerYear: 0, carryForward: false },
+            { leaveType: 'WFH', name: 'Work From Home', isPaid: true, accrualType: 'Policy', maxLimitPerYear: 0, carryForward: false }
+        ];
+ 
+        for (const def of defaults) {
+            const exists = await LeaveConfig.findOne({ leaveType: def.leaveType, companyId: defaultCompany._id });
+            if (!exists) {
+                await LeaveConfig.create({ ...def, companyId: defaultCompany._id });
+                console.log(`Seeded ${def.name} for ${defaultCompany.name}`);
+            }
+        }
 
         // 2. All Models that require companyId association
         const modelsToUpdate = [

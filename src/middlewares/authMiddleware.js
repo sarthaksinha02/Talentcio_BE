@@ -79,10 +79,20 @@ const protect = async (req, res, next) => {
 };
 
 const admin = (req, res, next) => {
-    if (req.user && req.user.roles && req.user.roles.some(role => role.name === 'Admin' || role === 'Admin' || (typeof role === 'object' && role.name === 'Admin'))) {
+    const isAdminRole = req.user && req.user.roles && req.user.roles.some(role => 
+        role.name === 'Admin' || role === 'Admin' || (typeof role === 'object' && role.name === 'Admin')
+    );
+    
+    const hasAdminPermission = req.user && req.user.permissions && (
+        req.user.permissions.includes('*') || 
+        req.user.permissions.includes('all') ||
+        req.user.permissions.includes('admin')
+    );
+
+    if (isAdminRole || hasAdminPermission) {
         next();
     } else {
-        res.status(403).json({ message: 'Not authorized as an admin' });
+        res.status(403).json({ message: 'Not authorized as an admin (Role or Permission missing)' });
     }
 };
 
