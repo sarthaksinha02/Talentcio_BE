@@ -7,31 +7,29 @@ const Company = require('../models/Company');
 const tenantMiddleware = async (req, res, next) => {
     try {
         const host = req.headers.host;
-        let subdomain = '';
+        // 1. Prioritize header or query param (explicitly set by frontend)
+        const tenantHeader = req.headers['x-tenant-id'];
+        const tenantQuery = req.query.tenant;
+        subdomain = tenantHeader || tenantQuery;
 
-        // 1. Extract subdomain from host
-        if (host) {
-            // Remove port if present (e.g., sarthak.localhost:5174 -> sarthak.localhost)
+        // 2. Fallback to host-based extraction (useful for local dev or same-domain setups)
+        if (!subdomain && host) {
             const domain = host.split(':')[0];
             const parts = domain.split('.');
 
-            // Example: company-a.talentcio.com -> parts = ['company-a', 'talentcio', 'com']
-            // Example: sarthak.localhost -> parts = ['sarthak', 'localhost']
             if (domain.endsWith('localhost')) {
                 if (parts.length > 1 && parts[0] !== 'localhost') {
                     subdomain = parts[0];
                 }
             } else if (parts.length > 2) {
-                subdomain = parts[0];
+                // Ignore subdomains if they belong to known cloud hosting providers
+                const cloudProviders = ['render.com', 'onrender.com', 'vercel.app', 'herokuapp.com'];
+                const isCloudDomain = cloudProviders.some(p => domain.endsWith(p));
+                
+                if (!isCloudDomain) {
+                    subdomain = parts[0];
+                }
             }
-        }
-
-        // 2. Fallback to header or query param (useful for development/testing/mobile)
-        const tenantHeader = req.headers['x-tenant-id'];
-        const tenantQuery = req.query.tenant;
-
-        if (!subdomain) {
-            subdomain = tenantHeader || tenantQuery;
         }
 
         // If no subdomain is found, we might be hitting the landing page or a global route
