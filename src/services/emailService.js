@@ -6,21 +6,18 @@ const nodemailer = require('nodemailer');
 const getTransporter = () => {
     const host = process.env.EMAIL_HOST || 'smtp-relay.brevo.com';
     const port = parseInt(process.env.EMAIL_PORT) || 587;
-    const user = process.env.EMAIL_USER;
-    
-    console.log(`[SMTP] Attempting connection to ${host}:${port} as ${user}`);
     
     return nodemailer.createTransport({
         host,
         port,
-        secure: port === 465, // true for 465, false for 587/25
+        secure: port === 465,
         auth: {
-            user,
+            user: process.env.EMAIL_USER,
             pass: process.env.EMAIL_PASS || process.env.BREVO_API_KEY,
         },
-        // Helpful for debugging
-        debug: true,
-        logger: true 
+        connectionTimeout: 10000, // 10 seconds
+        greetingTimeout: 10000,
+        socketTimeout: 10000
     });
 };
 
@@ -35,10 +32,6 @@ const sendEmail = async ({ to, subject, html, text }) => {
 
     try {
         const transporter = getTransporter();
-        
-        // Detailed verification (only logs once per process)
-        await transporter.verify();
-        
         const info = await transporter.sendMail({
             from: `"TalentCio" <${process.env.EMAIL_FROM || 'no-reply@talentcio.com'}>`,
             to,

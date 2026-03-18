@@ -83,15 +83,16 @@ const loginUser = async (req, res) => {
             user.otpExpires = Date.now() + 10 * 60 * 1000;
             await user.save();
 
-            // Send OTP via Email
-            const emailSent = await emailService.sendOTPEmail(user.email, otpCode, user.firstName);
+            // Send OTP via Email (Non-blocking)
+            emailService.sendOTPEmail(user.email, otpCode, user.firstName).catch(err => {
+                console.error('[AUTH] Background Email Send Error:', err.message);
+            });
 
             return res.status(200).json({
                 message: 'Password reset required on first login. An OTP has been sent to your email.',
                 passwordResetRequired: true,
                 email: user.email,
-                userId: user._id,
-                emailSent: emailSent
+                userId: user._id
             });
         }
 
