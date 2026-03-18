@@ -231,7 +231,7 @@ exports.getQueryById = async (req, res) => {
 exports.updateQueryStatus = async (req, res) => {
     try {
         const { status } = req.body;
-        const query = await HelpdeskQuery.findById(req.params.id).populate('queryType');
+        const query = await HelpdeskQuery.findOne({ _id: req.params.id, companyId: req.companyId }).populate('queryType');
 
         if (!query) {
             return res.status(404).json({ success: false, message: 'Query not found' });
@@ -309,7 +309,7 @@ exports.addComment = async (req, res) => {
 
         if (!text) return res.status(400).json({ success: false, message: 'Comment text is required' });
 
-        const query = await HelpdeskQuery.findById(req.params.id);
+        const query = await HelpdeskQuery.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!query) return res.status(404).json({ success: false, message: 'Query not found' });
 

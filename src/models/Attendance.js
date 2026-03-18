@@ -10,6 +10,11 @@ const attendanceSchema = new mongoose.Schema({
         type: Date,
         required: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     clockIn: {
         type: Date
     },
@@ -23,7 +28,8 @@ const attendanceSchema = new mongoose.Schema({
         enum: ['PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE'],
         default: 'ABSENT'
     },
-    ipAddress: String,
+    ipAddress: String, // Clock-in IP
+    clockOutIpAddress: String, // Clock-out IP
     location: {
         lat: Number,
         lng: Number,

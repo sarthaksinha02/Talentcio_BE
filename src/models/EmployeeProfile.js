@@ -42,6 +42,7 @@ const ChildSchema = new mongoose.Schema({
 
 const employeeProfileSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
 
     // --- Personal Information ---
     personal: {

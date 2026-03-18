@@ -20,6 +20,11 @@ const meetingSchema = new mongoose.Schema({
     date: { type: Date, required: true },
     startTime: String,
     endTime: String,
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     meetingType: { type: String, enum: ['Internal', 'Client', 'Project', 'Other'], default: 'Internal' },
     location: String,
     objective: String,

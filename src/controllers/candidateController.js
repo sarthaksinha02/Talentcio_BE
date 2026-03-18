@@ -14,7 +14,7 @@ exports.uploadResume = async (req, res) => {
         console.log('📤 Upload resume request for hiring request:', hiringRequestId);
 
         // Verify hiring request exists
-        const hiringRequest = await HiringRequest.findById(hiringRequestId);
+        const hiringRequest = await HiringRequest.findOne({ _id: hiringRequestId, companyId: req.companyId });
         if (!hiringRequest) {
             return res.status(404).json({ message: 'Hiring request not found' });
         }
@@ -89,25 +89,26 @@ exports.createCandidate = async (req, res) => {
         } = req.body;
 
         // Verify hiring request exists
-        const hiringRequest = await HiringRequest.findById(hiringRequestId);
+        const hiringRequest = await HiringRequest.findOne({ _id: hiringRequestId, companyId: req.companyId });
         if (!hiringRequest) {
             return res.status(404).json({ message: 'Hiring request not found' });
         }
 
         // Check for duplicate email in same hiring request
-        const existingByEmail = await Candidate.findOne({ hiringRequestId, email });
+        const existingByEmail = await Candidate.findOne({ hiringRequestId, email, companyId: req.companyId });
         if (existingByEmail) {
             return res.status(400).json({ message: 'A candidate with this email is already added to this hiring request' });
         }
 
         // Check for duplicate mobile in same hiring request
-        const existingByMobile = await Candidate.findOne({ hiringRequestId, mobile });
+        const existingByMobile = await Candidate.findOne({ hiringRequestId, mobile, companyId: req.companyId });
         if (existingByMobile) {
             return res.status(400).json({ message: 'A candidate with this mobile number is already added to this hiring request' });
         }
 
         // Create candidate
         const candidate = new Candidate({
+            companyId: req.companyId,
             hiringRequestId,
             resumeUrl,
             resumePublicId,
@@ -145,7 +146,7 @@ exports.createCandidate = async (req, res) => {
 
         await candidate.save();
 
-        const populatedCandidate = await Candidate.findById(candidate._id)
+        const populatedCandidate = await Candidate.findOne({ _id: candidate._id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails');
 
@@ -178,7 +179,7 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
         const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
         // Check if user is creator/HM/recruiter/approver of the hiring request
-        const hiringRequest = await HiringRequest.findById(hiringRequestId);
+        const hiringRequest = await HiringRequest.findOne({ _id: hiringRequestId, companyId: req.companyId });
         const isRequestParticipant = hiringRequest && (
             hiringRequest.createdBy?._id?.toString() === req.user._id.toString() ||
             hiringRequest.ownership?.hiringManager?._id?.toString() === req.user._id.toString() ||
@@ -195,7 +196,7 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
             query['interviewRounds.assignedTo'] = req.user._id;
         }
 
-        const candidates = await Candidate.find(query)
+        const candidates = await Candidate.find({ ...query, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails')
             .sort({ uploadedAt: -1 })
@@ -229,7 +230,7 @@ exports.getShortlistedCandidates = async (req, res) => {
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
         const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
-        const hiringRequest = await HiringRequest.findById(hiringRequestId);
+        const hiringRequest = await HiringRequest.findOne({ _id: hiringRequestId, companyId: req.companyId });
         const isRequestParticipant = hiringRequest && (
             hiringRequest.createdBy?._id?.toString() === req.user._id.toString() ||
             hiringRequest.ownership?.hiringManager?._id?.toString() === req.user._id.toString() ||
@@ -245,8 +246,8 @@ exports.getShortlistedCandidates = async (req, res) => {
             query['interviewRounds.assignedTo'] = req.user._id;
         }
 
-        const totalOptions = await Candidate.countDocuments(query);
-        const candidates = await Candidate.find(query)
+        const totalOptions = await Candidate.countDocuments({ ...query, companyId: req.companyId });
+        const candidates = await Candidate.find({ ...query, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName')
             .populate('hiringRequestId', 'requestId roleDetails')
             .populate('interviewRounds.assignedTo', 'firstName lastName') // only pull what is necessary
@@ -274,7 +275,7 @@ exports.getCandidateById = async (req, res) => {
     try {
         const { id } = req.params;
 
-        let candidateData = await Candidate.findById(id)
+        let candidateData = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails requirements')
             .populate('statusHistory.changedBy', 'firstName lastName')
@@ -308,7 +309,7 @@ exports.getCandidateById = async (req, res) => {
             syncSkills(hrr.niceToHaveSkills, 'Nice-To-Have');
 
             if (hasChanges) {
-                await Candidate.findByIdAndUpdate(id, { $set: { skillRatings: currentRatings } });
+                await Candidate.findOneAndUpdate({ _id: id, companyId: req.companyId }, { $set: { skillRatings: currentRatings } });
                 candidateData.skillRatings = currentRatings;
             }
         }
@@ -354,18 +355,14 @@ exports.updateCandidate = async (req, res) => {
         const { id } = req.params;
         const updateData = req.body;
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
 
         // Check if email is being changed and if it conflicts
         if (updateData.email && updateData.email !== candidate.email) {
-            const existingCandidate = await Candidate.findOne({
-                hiringRequestId: candidate.hiringRequestId,
-                email: updateData.email,
-                _id: { $ne: id }
-            });
+            const existingCandidate = await Candidate.findOne({ hiringRequestId: candidate.hiringRequestId, email: updateData.email, _id: { $ne: id }, companyId: req.companyId });
             if (existingCandidate) {
                 return res.status(400).json({ message: 'Another candidate with this email already exists for this hiring request' });
             }
@@ -398,7 +395,7 @@ exports.updateCandidate = async (req, res) => {
 
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails');
 
@@ -418,7 +415,7 @@ exports.deleteCandidate = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -433,7 +430,7 @@ exports.deleteCandidate = async (req, res) => {
             }
         }
 
-        await Candidate.findByIdAndDelete(id);
+        await Candidate.findOneAndDelete({ _id: id, companyId: req.companyId });
 
         res.status(200).json({ message: 'Candidate deleted successfully' });
 
@@ -453,7 +450,7 @@ exports.updateCandidateStatus = async (req, res) => {
             return res.status(400).json({ message: 'Status is required' });
         }
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -471,7 +468,7 @@ exports.updateCandidateStatus = async (req, res) => {
 
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('statusHistory.changedBy', 'firstName lastName');
 
@@ -492,7 +489,7 @@ exports.updateCandidateRemark = async (req, res) => {
         const { id } = req.params;
         const { remark } = req.body;
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -500,7 +497,7 @@ exports.updateCandidateRemark = async (req, res) => {
         candidate.remark = remark;
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails');
 
@@ -521,7 +518,7 @@ exports.updateCandidateInternalRemark = async (req, res) => {
         const { id } = req.params;
         const { internalRemark } = req.body;
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -550,7 +547,7 @@ exports.updateCandidateDecision = async (req, res) => {
             return res.status(400).json({ message: 'Decision is required' });
         }
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -558,7 +555,7 @@ exports.updateCandidateDecision = async (req, res) => {
         candidate.decision = decision;
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails');
 
@@ -583,7 +580,7 @@ exports.updatePhase2Decision = async (req, res) => {
             return res.status(400).json({ message: 'Phase 2 Decision is required' });
         }
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -591,7 +588,7 @@ exports.updatePhase2Decision = async (req, res) => {
         candidate.phase2Decision = phase2Decision;
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails');
 
@@ -616,7 +613,7 @@ exports.updatePhase3Decision = async (req, res) => {
             return res.status(400).json({ message: 'Phase 3 Decision is required' });
         }
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -624,7 +621,7 @@ exports.updatePhase3Decision = async (req, res) => {
         candidate.phase3Decision = phase3Decision;
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails');
 
@@ -642,7 +639,7 @@ exports.updatePhase3Decision = async (req, res) => {
 // Get distinct candidate sources
 exports.getCandidateSources = async (req, res) => {
     try {
-        const sources = await Candidate.distinct('source');
+        const sources = await Candidate.distinct('source', { companyId: req.companyId });
         // Ensure default sources are included if not present in DB
         const defaultSources = ['Job Portal', 'Referral'];
         const allSources = [...new Set([...defaultSources, ...sources])];
@@ -666,7 +663,7 @@ exports.addInterviewRound = async (req, res) => {
             return res.status(400).json({ message: 'Level name is required' });
         }
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -682,7 +679,7 @@ exports.addInterviewRound = async (req, res) => {
         candidate.interviewRounds.push(newRound);
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('hiringRequestId', 'requestId')
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName');
@@ -730,7 +727,7 @@ exports.updateInterviewRound = async (req, res) => {
         const { id, roundId } = req.params;
         const { levelName, assignedTo, scheduledDate, phase } = req.body;
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -747,7 +744,7 @@ exports.updateInterviewRound = async (req, res) => {
 
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName');
 
@@ -781,7 +778,7 @@ exports.deleteInterviewRound = async (req, res) => {
     try {
         const { id, roundId } = req.params;
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -809,6 +806,7 @@ exports.getMyScheduledInterviews = async (req, res) => {
         // Find all candidates that have an interview round assigned to the current user
         // and its status is 'Scheduled' or 'Pending'
         const candidates = await Candidate.find({
+            companyId: req.companyId,
             'interviewRounds': {
                 $elemMatch: {
                     assignedTo: userId,
@@ -872,7 +870,7 @@ exports.getCandidatesByPulledBy = async (req, res) => {
         // Use a case-insensitive regex for more robust matching
         const query = { profilePulledBy: { $regex: new RegExp(`^${userName}$`, 'i') } };
 
-        const candidates = await Candidate.find(query)
+        const candidates = await Candidate.find({ ...query, companyId: req.companyId })
             .populate('hiringRequestId', 'requestId roleDetails')
             .populate('uploadedBy', 'firstName lastName email')
             .sort({ uploadedAt: -1 })
@@ -903,7 +901,7 @@ exports.evaluateInterviewRound = async (req, res) => {
             return res.status(400).json({ message: 'Feedback is required for evaluation' });
         }
 
-        const candidate = await Candidate.findById(id).populate('interviewRounds.assignedTo');
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId }).populate('interviewRounds.assignedTo');
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -962,7 +960,7 @@ exports.evaluateInterviewRound = async (req, res) => {
 
         await candidate.save();
 
-        const updatedCandidate = await Candidate.findById(id)
+        const updatedCandidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName');
 
@@ -1004,7 +1002,7 @@ exports.updateSkillRatings = async (req, res) => {
             return res.status(400).json({ message: 'Skill ratings must be an array' });
         }
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -1032,7 +1030,7 @@ exports.addSkillRating = async (req, res) => {
             return res.status(400).json({ message: 'Skill name is required' });
         }
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }
@@ -1060,7 +1058,7 @@ exports.deleteSkillRating = async (req, res) => {
     try {
         const { id, skillId } = req.params;
 
-        const candidate = await Candidate.findById(id);
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId });
         if (!candidate) {
             return res.status(404).json({ message: 'Candidate not found' });
         }

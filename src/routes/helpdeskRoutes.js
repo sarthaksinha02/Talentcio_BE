@@ -1,4 +1,5 @@
 const express = require('express');
+const { requireModule } = require('../middlewares/moduleGuard');
 const router = express.Router();
 const { protect } = require('../middlewares/authMiddleware');
 const {
@@ -18,6 +19,7 @@ const {
 
 // All helpdesk routes require authentication
 router.use(protect);
+router.use(requireModule('helpdesk'));
 
 // Query Type Routes (Admin mostly, but get is open)
 router.get('/types', getQueryTypes);

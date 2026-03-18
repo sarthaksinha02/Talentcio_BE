@@ -6,7 +6,7 @@ const LeaveBalance = require('../models/LeaveBalance'); // Added for balance rec
 // @access  Public (Authenticated)
 const getLeavePolicies = async (req, res) => {
     try {
-        const policies = await LeaveConfig.find({ isActive: true });
+        const policies = await LeaveConfig.find({ isActive: true, companyId: req.companyId });
         res.json(policies);
     } catch (error) {
         console.error(error);
@@ -21,12 +21,12 @@ const updateLeavePolicy = async (req, res) => {
     const {
         leaveType, name, description, employeeTypes, isPaid,
         accrualType, accrualAmount, carryForward, maxCarryForward,
-        encashmentAllowed, maxLimitPerYear,
+        maxLimitPerYear, genderSpecific, applicableGender,
         sandwichRule, allowNegativeBalance, proofRequiredAbove, allowBackdated, proRata
     } = req.body;
 
     try {
-        let policy = await LeaveConfig.findOne({ leaveType });
+        let policy = await LeaveConfig.findOne({ leaveType, companyId: req.companyId });
 
         if (policy) {
             // Update existing
@@ -38,8 +38,9 @@ const updateLeavePolicy = async (req, res) => {
             policy.accrualAmount = accrualAmount !== undefined ? accrualAmount : policy.accrualAmount;
             policy.carryForward = carryForward !== undefined ? carryForward : policy.carryForward;
             policy.maxCarryForward = maxCarryForward !== undefined ? maxCarryForward : policy.maxCarryForward;
-            policy.encashmentAllowed = encashmentAllowed !== undefined ? encashmentAllowed : policy.encashmentAllowed;
             policy.maxLimitPerYear = maxLimitPerYear !== undefined ? maxLimitPerYear : policy.maxLimitPerYear;
+            policy.genderSpecific = genderSpecific !== undefined ? genderSpecific : policy.genderSpecific;
+            policy.applicableGender = applicableGender || policy.applicableGender;
 
             // Rules
             policy.sandwichRule = sandwichRule !== undefined ? sandwichRule : policy.sandwichRule;
@@ -70,7 +71,7 @@ const updateLeavePolicy = async (req, res) => {
 
                 // Update all current year balances for this policy across all users
                 await LeaveBalance.updateMany(
-                    { leaveType: policy.leaveType, year: currentYear },
+                    { leaveType: policy.leaveType, year: currentYear, companyId: req.companyId },
                     { $set: { accrued: newAccruedValue } }
                 );
             } catch (calcError) {
@@ -82,9 +83,10 @@ const updateLeavePolicy = async (req, res) => {
         } else {
             // Create New
             policy = await LeaveConfig.create({
+                companyId: req.companyId,
                 leaveType, name, description, employeeTypes, isPaid,
                 accrualType, accrualAmount, carryForward, maxCarryForward,
-                encashmentAllowed, maxLimitPerYear,
+                maxLimitPerYear, genderSpecific, applicableGender,
                 sandwichRule, allowNegativeBalance, proofRequiredAbove, allowBackdated, proRata
             });
             return res.status(201).json(policy);
@@ -103,15 +105,15 @@ const seedDefaultPolicies = async (req, res) => {
         const defaults = [
             { leaveType: 'CL', name: 'Casual Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1, maxLimitPerYear: 12, carryForward: false },
             { leaveType: 'SL', name: 'Sick Leave', isPaid: true, accrualType: 'Yearly', accrualAmount: 8, maxLimitPerYear: 8, carryForward: false },
-            { leaveType: 'EL', name: 'Earned Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1.25, maxLimitPerYear: 15, carryForward: true, maxCarryForward: 30, encashmentAllowed: true }, // Approx 15/year logic varies
+            { leaveType: 'EL', name: 'Earned Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1.25, maxLimitPerYear: 15, carryForward: true, maxCarryForward: 30 }, // Approx 15/year logic varies
             { leaveType: 'LOP', name: 'Loss of Pay', isPaid: false, accrualType: 'None', maxLimitPerYear: 0, carryForward: false },
             { leaveType: 'WFH', name: 'Work From Home', isPaid: true, accrualType: 'Policy', maxLimitPerYear: 0, carryForward: false }
         ];
 
         for (const def of defaults) {
-            const exists = await LeaveConfig.findOne({ leaveType: def.leaveType });
+            const exists = await LeaveConfig.findOne({ leaveType: def.leaveType, companyId: req.companyId });
             if (!exists) {
-                await LeaveConfig.create(def);
+                await LeaveConfig.create({ ...def, companyId: req.companyId });
             }
         }
 
@@ -156,7 +158,7 @@ const triggerYearlyAccrual = async (req, res) => {
 // @access  Private (Admin)
 const deleteLeavePolicy = async (req, res) => {
     try {
-        const policy = await LeaveConfig.findById(req.params.id);
+        const policy = await LeaveConfig.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!policy) {
             return res.status(404).json({ message: 'Policy not found' });

@@ -24,10 +24,33 @@ const protect = async (req, res, next) => {
                         path: 'permissions'
                     }
                 }).populate('reportingManagers', 'firstName lastName');
+            
+            if (req.user && req.user.roles) {
+                req.user.permissions = [...new Set(
+                    req.user.roles.flatMap(role => 
+                        (role.permissions || []).map(p => typeof p === 'object' ? p.key : p)
+                    )
+                )];
+            }
 
             // Ensure roles is always an array
             if (req.user && !req.user.roles) {
                 req.user.roles = [];
+            }
+
+            // --- Multi-tenant isolation check ---
+            // If a tenant workspace is identified (subdomain), the user MUST belong to it.
+            if (req.companyId && req.user.companyId && req.user.companyId.toString() !== req.companyId.toString()) {
+                console.warn(`[SECURITY ALERT] User ${req.user.email} attempted cross-tenant access from workspace ${req.company?.name || req.companyId} while belonging to ${req.user.companyId}`);
+                return res.status(403).json({ 
+                    message: `Your account does not belong to the '${req.company?.name || 'requested'}' workspace.`,
+                    code: 'TENANT_MISMATCH'
+                });
+            }
+
+            // Sync companyId from user if not set by tenantMiddleware (fallback for localhost/standalone)
+            if (!req.companyId && req.user.companyId) {
+                req.companyId = req.user.companyId;
             }
 
             if (!req.user) {

@@ -1,13 +1,17 @@
 const express = require('express');
+const { requireModule } = require('../middlewares/moduleGuard');
 const router = express.Router();
+// Note: requireModule added after protect middleware
 const { protect, admin } = require('../middlewares/authMiddleware');
 const { getLeavePolicies, updateLeavePolicy, deleteLeavePolicy, seedDefaultPolicies, triggerMonthlyAccrual, triggerYearlyAccrual } = require('../controllers/leaveConfigController');
 const { applyLeave, getMyLeaves, getMyBalances, getManagerApprovals, updateLeaveStatus, cancelLeave } = require('../controllers/leaveController');
 
+router.use(protect);
+router.use(requireModule('leaves'));
 // Configuration Routes
 router.route('/config')
-    .get(protect, getLeavePolicies)
-    .post(protect, admin, updateLeavePolicy);
+    .get(getLeavePolicies)
+    .post(admin, updateLeavePolicy);
 
 router.delete('/config/:id', protect, admin, deleteLeavePolicy);
 

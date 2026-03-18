@@ -5,7 +5,7 @@ const Notification = require('../models/Notification');
 // @access  Private
 exports.getMyNotifications = async (req, res) => {
     try {
-        const notifications = await Notification.find({ user: req.user._id })
+        const notifications = await Notification.find({ user: req.user._id, companyId: req.companyId })
             .sort({ createdAt: -1 })
             .limit(50); // Keep it to a reasonable maximum for performance
             

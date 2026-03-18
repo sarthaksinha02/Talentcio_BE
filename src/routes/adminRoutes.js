@@ -8,7 +8,8 @@ const {
     updateUserRole,
     updateUser,
     getMyTeam,
-    getUserById
+    getUserById,
+    toggleUserStatus
 } = require('../controllers/userController');
 const {
     getRoles,
@@ -27,6 +28,7 @@ router.post('/users', authorize('user.create'), createUser);
 router.get('/users/:id', authorize(['user.read', 'attendance.view']), getUserById);
 router.put('/users/:id', authorize('user.update'), updateUser);
 router.put('/users/:id/role', authorize('user.update'), updateUserRole);
+router.patch('/users/:id/status', authorize('user.update'), toggleUserStatus);
 
 // Role Routes
 router.get('/roles', authorize('role.read'), getRoles);

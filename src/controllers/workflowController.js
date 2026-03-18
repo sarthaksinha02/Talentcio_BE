@@ -6,6 +6,7 @@ exports.createWorkflow = async (req, res) => {
         const { name, description, levels, module } = req.body;
 
         const workflow = await ApprovalWorkflow.create({
+            companyId: req.companyId,
             name,
             description,
             levels: levels.map(l => ({
@@ -34,7 +35,7 @@ exports.getWorkflows = async (req, res) => {
             query.module = req.query.module;
         }
 
-        const workflows = await ApprovalWorkflow.find(query)
+        const workflows = await ApprovalWorkflow.find({ ...query, companyId: req.companyId })
             .populate('levels.role', 'name')
             .populate('levels.approvers', 'firstName lastName email');
         res.status(200).json(workflows);
@@ -47,7 +48,7 @@ exports.getWorkflows = async (req, res) => {
 // --- Get Single Workflow ---
 exports.getWorkflowById = async (req, res) => {
     try {
-        const workflow = await ApprovalWorkflow.findById(req.params.id)
+        const workflow = await ApprovalWorkflow.findOne({ _id: req.params.id, companyId: req.companyId })
             .populate('levels.role', 'name')
             .populate('levels.approvers', 'firstName lastName email');
         if (!workflow) return res.status(404).json({ message: 'Workflow not found' });
@@ -61,8 +62,7 @@ exports.getWorkflowById = async (req, res) => {
 // --- Update Workflow ---
 exports.updateWorkflow = async (req, res) => {
     try {
-        const workflow = await ApprovalWorkflow.findByIdAndUpdate(
-            req.params.id,
+        const workflow = await ApprovalWorkflow.findOneAndUpdate({ _id: req.params.id, companyId: req.companyId },
             req.body,
             { new: true, runValidators: true }
         );
@@ -77,7 +77,7 @@ exports.updateWorkflow = async (req, res) => {
 // --- Delete Workflow ---
 exports.deleteWorkflow = async (req, res) => {
     try {
-        const workflow = await ApprovalWorkflow.findByIdAndDelete(req.params.id);
+        const workflow = await ApprovalWorkflow.findOneAndDelete({ _id: req.params.id, companyId: req.companyId });
         if (!workflow) return res.status(404).json({ message: 'Workflow not found' });
         res.status(200).json({ message: 'Workflow deleted successfully' });
     } catch (error) {

@@ -343,7 +343,7 @@ const updateLeaveStatus = async (req, res) => {
         });
 
         await request.save();
-        
+
         // Notify Employee
         const io = req.app.get('io');
         await NotificationService.createNotification(io, {

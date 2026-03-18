@@ -8,7 +8,7 @@ const Candidate = require('../models/Candidate');
 // @access  Private (Admin)
 const getUsers = async (req, res) => {
     try {
-        const users = await User.find({})
+        const users = await User.find({ companyId: req.companyId })
             .select('-password -company')
             .populate({
                 path: 'roles',
@@ -32,18 +32,19 @@ const createUser = async (req, res) => {
 
     try {
         // Check if user exists
-        const userExists = await User.findOne({ email });
+        const userExists = await User.findOne({ email, companyId: req.companyId });
         if (userExists) {
             return res.status(400).json({ message: 'User already exists' });
         }
 
         // Validate Role
-        const role = await Role.findById(roleId);
+        const role = await Role.findOne({ _id: roleId, companyId: req.companyId });
         if (!role) {
             return res.status(400).json({ message: 'Invalid Role' });
         }
 
         const user = await User.create({
+            companyId: req.companyId,
             firstName,
             lastName,
             email,
@@ -87,7 +88,7 @@ const createUser = async (req, res) => {
 const updateUserRole = async (req, res) => {
     const { roleId } = req.body;
     try {
-        const user = await User.findById(req.params.id);
+        const user = await User.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
@@ -111,7 +112,7 @@ const updateUser = async (req, res) => {
     const { firstName, lastName, email, password, roleId, department, workLocation, employmentType, employeeCode, joiningDate, directReports } = req.body;
     console.log('Update User Body:', req.body); // DEBUG LOG
     try {
-        const user = await User.findById(req.params.id);
+        const user = await User.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
@@ -131,7 +132,7 @@ const updateUser = async (req, res) => {
             // Only update role if it's different and valid
             const currentRoleId = user.roles && user.roles.length > 0 ? user.roles[0].toString() : null;
             if (currentRoleId !== roleId) {
-                const role = await Role.findById(roleId);
+                const role = await Role.findOne({ _id: roleId, companyId: req.companyId });
                 if (role) {
                     user.roles = [roleId];
                     user.tokenVersion = (user.tokenVersion || 0) + 1;
@@ -165,7 +166,7 @@ const updateUser = async (req, res) => {
 
 const getMyTeam = async (req, res) => {
     try {
-        const team = await User.find({ reportingManagers: req.user._id })
+        const team = await User.find({ reportingManagers: req.user._id, companyId: req.companyId })
             .select('-password')
             .populate('roles', 'name')
             .populate('reportingManagers', 'firstName lastName email')
@@ -179,8 +180,10 @@ const getMyTeam = async (req, res) => {
 
 const getMyself = async (req, res) => {
     try {
-        const user = await User.findById(req.user._id)
-            .select('-password -company -tokenVersion -dossierStatus -employeeProfile')
+        const query = { _id: req.user._id };
+        if (req.companyId) query.companyId = req.companyId;
+        const user = await User.findOne(query)
+            .select('-password -tokenVersion -dossierStatus -employeeProfile')
             .populate({
                 path: 'roles',
                 select: 'name',
@@ -188,7 +191,13 @@ const getMyself = async (req, res) => {
             })
             .populate('reportingManagers', 'firstName lastName email');
 
-        // Flatten unique permission keys (same logic as loginUser)
+        if (!user) {
+            return res.status(404).json({ message: 'User not found in this workspace context' });
+        }
+
+        
+        const effectiveCompanyId = req.companyId || user?.companyId;
+// Flatten unique permission keys (same logic as loginUser)
         let permissions = [...new Set(
             user.roles.flatMap(role => (role.permissions || []).filter(p => p).map(p => p.key))
         )];
@@ -199,15 +208,16 @@ const getMyself = async (req, res) => {
 
         if (permissions.includes('*')) {
             hasAllPermissions = true;
-            const allPermissions = await Permission.find({});
+            const allPermissions = await Permission.find({ companyId: effectiveCompanyId });
             const allKeys = allPermissions.map(p => p.key);
             permissions = [...new Set([...permissions, ...allKeys])];
 
             // Because we don't need totalPerms, we just fetch the others concurrently
             [directReportsCount, subordinates, taCount] = await Promise.all([
-                User.countDocuments({ reportingManagers: req.user._id }),
-                User.find({ reportingManagers: req.user._id }).select('firstName lastName email role department'),
+                User.countDocuments({ reportingManagers: req.user._id, companyId: effectiveCompanyId }),
+                User.find({ reportingManagers: req.user._id, companyId: effectiveCompanyId }).select('firstName lastName email role department'),
                 HiringRequest.countDocuments({
+                    companyId: effectiveCompanyId,
                     $or: [
                         { createdBy: req.user._id },
                         { 'ownership.hiringManager': req.user._id },
@@ -218,10 +228,11 @@ const getMyself = async (req, res) => {
         } else {
             // Fetch everything concurrently
             [totalPerms, directReportsCount, subordinates, taCount] = await Promise.all([
-                Permission.countDocuments({ key: { $ne: '*' } }),
-                User.countDocuments({ reportingManagers: req.user._id }),
-                User.find({ reportingManagers: req.user._id }).select('firstName lastName email role department'),
+                Permission.countDocuments({ key: { $ne: '*' }, companyId: effectiveCompanyId }),
+                User.countDocuments({ reportingManagers: req.user._id, companyId: effectiveCompanyId }),
+                User.find({ reportingManagers: req.user._id, companyId: effectiveCompanyId }).select('firstName lastName email role department'),
                 HiringRequest.countDocuments({
+                    companyId: effectiveCompanyId,
                     $or: [
                         { createdBy: req.user._id },
                         { 'ownership.hiringManager': req.user._id },
@@ -239,11 +250,15 @@ const getMyself = async (req, res) => {
         let isInterviewer = false;
         let interviewCount = 0;
         if (taCount === 0 && !permissions.includes('ta.view') && !permissions.includes('*')) {
-            interviewCount = await Candidate.countDocuments({
-                'interviewRounds.assignedTo': req.user._id
-            });
+            interviewCount = await Candidate.countDocuments({ 'interviewRounds.assignedTo': req.user._id, companyId: effectiveCompanyId });
             isInterviewer = interviewCount > 0;
         }
+
+        // Always fetch company to ensure enabledModules are included.
+        // req.company is set by tenantMiddleware when subdomain is present.
+        // On localhost (no subdomain), fall back to user's own companyId.
+        const Company = require('../models/Company');
+        const company = req.company || await Company.findById(effectiveCompanyId).lean();
 
         res.json({
             // Core identity
@@ -262,13 +277,14 @@ const getMyself = async (req, res) => {
             updatedAt: user.updatedAt,
             reportingManagers: user.reportingManagers,
             // Auth & access control
-            roles: user.roles.map(r => r.name),   // Just names — Profile.jsx uses r directly but it's a string now
+            roles: user.roles.map(r => r.name),
             roleNames: user.roles.map(r => r.name),
             permissions,
             hasAllPermissions,
             directReports: subordinates,
             directReportsCount,
-            isTAParticipant: taCount > 0 || isInterviewer
+            isTAParticipant: taCount > 0 || isInterviewer,
+            company: company  // Always includes enabledModules
         });
     } catch (error) {
         console.error(error);
@@ -278,13 +294,24 @@ const getMyself = async (req, res) => {
 
 const getUserById = async (req, res) => {
     try {
-        const user = await User.findById(req.params.id)
+        const user = await User.findOne({ _id: req.params.id, companyId: req.companyId })
             .select('-password -company')
             .populate('roles', 'name')
-            .populate('reportingManagers', 'firstName lastName email');
+            .populate('reportingManagers', 'firstName lastName email')
+            .lean();
+
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
+
+        // Fetch direct reports to allow frontend checkbox pre-filling
+        const directReports = await User.find({ 
+            reportingManagers: user._id, 
+            companyId: req.companyId 
+        }).select('_id firstName lastName email');
+
+        user.directReports = directReports;
+
         res.json(user);
     } catch (error) {
         console.error(error);
@@ -295,10 +322,11 @@ const getUserById = async (req, res) => {
 // TEMP DEBUG: Remove after fixing isTAParticipant issue
 const debugTA = async (req, res) => {
     try {
-        const user = await User.findById(req.user._id).populate({ path: 'roles', populate: { path: 'permissions' } });
+        const user = await User.findOne({ _id: req.user._id, companyId: req.companyId }).populate({ path: 'roles', populate: { path: 'permissions' } });
         const permissions = [...new Set(user.roles.flatMap(r => (r.permissions || []).filter(p => p).map(p => p.key)))];
 
         const taParticipantHRRs = await HiringRequest.find({
+            companyId: req.companyId,
             $or: [
                 { createdBy: req.user._id },
                 { 'ownership.hiringManager': req.user._id },
@@ -306,17 +334,11 @@ const debugTA = async (req, res) => {
             ]
         }).select('requestId createdBy ownership.hiringManager ownership.recruiter').lean();
 
-        const panelHRRs = await HiringRequest.find({
-            'ownership.interviewPanel': req.user._id
-        }).select('requestId').lean();
+        const panelHRRs = await HiringRequest.find({ 'ownership.interviewPanel': req.user._id, companyId: req.companyId }).select('requestId').lean();
 
-        const assignedCandidates = await Candidate.find({
-            'interviewRounds.assignedTo': req.user._id
-        }).select('candidateName hiringRequestId').lean();
+        const assignedCandidates = await Candidate.find({ 'interviewRounds.assignedTo': req.user._id, companyId: req.companyId }).select('candidateName hiringRequestId').lean();
 
-        const approverHRRs = await HiringRequest.find({
-            'approvalChain.approvers': req.user._id
-        }).select('requestId').lean();
+        const approverHRRs = await HiringRequest.find({ 'approvalChain.approvers': req.user._id, companyId: req.companyId }).select('requestId').lean();
 
         res.json({
             userId: req.user._id,
@@ -334,6 +356,29 @@ const debugTA = async (req, res) => {
     }
 };
 
+const toggleUserStatus = async (req, res) => {
+    try {
+        const user = await User.findOne({ _id: req.params.id, companyId: req.companyId });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        user.isActive = !user.isActive;
+        // Invalidate tokens if deactivating
+        user.tokenVersion = (user.tokenVersion || 0) + 1;
+        
+        await user.save();
+
+        res.json({ 
+            message: `User ${user.isActive ? 'activated' : 'deactivated'} successfully`,
+            isActive: user.isActive 
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
 module.exports = {
     getUsers,
     createUser,
@@ -342,5 +387,6 @@ module.exports = {
     getMyTeam,
     getMyself,
     getUserById,
+    toggleUserStatus,
     debugTA
 };

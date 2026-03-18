@@ -1,4 +1,5 @@
 const express = require('express');
+const { requireModule } = require('../middlewares/moduleGuard');
 const router = express.Router();
 const {
     createDiscussion,
@@ -11,6 +12,7 @@ const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/authorize');
 
 router.use(protect);
+router.use(requireModule('meetingsOfMinutes'));
 
 router.route('/')
     .get(authorize('discussion.read'), getDiscussions)

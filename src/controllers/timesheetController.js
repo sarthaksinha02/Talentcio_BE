@@ -2,7 +2,7 @@ const Timesheet = require('../models/Timesheet');
 const Project = require('../models/Project');
 const User = require('../models/User');
 const Attendance = require('../models/Attendance');
-const { startOfMonth, endOfMonth, format, startOfDay } = require('date-fns');
+const { startOfMonth, endOfMonth, startOfWeek, endOfWeek, format, startOfDay, endOfDay, addWeeks, subWeeks } = require('date-fns');
 const WorkLog = require('../models/WorkLog');
 
 // @desc    Get Current Month Timesheet
@@ -31,7 +31,7 @@ const getCurrentTimesheet = async (req, res) => {
             });
         }
 
-        // Populate User and Supervisor (Explicitly fetch to ensure data availability)
+        // Populate User and Supervisor
         let fullUser = null;
         try {
             fullUser = await User.findById(req.user._id)
@@ -39,7 +39,6 @@ const getCurrentTimesheet = async (req, res) => {
                 .populate('reportingManagers', 'firstName lastName email');
         } catch (err) {
             console.error('Error populating user details:', err);
-            // Fallback to basic req.user info if fetch fails
             fullUser = {
                 firstName: req.user.firstName,
                 lastName: req.user.lastName,
@@ -48,10 +47,35 @@ const getCurrentTimesheet = async (req, res) => {
             };
         }
 
-        // Fetch WorkLogs for this month (Single Source of Truth)
-        const [year, month] = currentMonth.split('-');
-        const start = startOfMonth(new Date(parseInt(year), parseInt(month) - 1));
-        const end = endOfMonth(new Date(parseInt(year), parseInt(month) - 1));
+        // Fetch WorkLogs for this period based on cycle
+        const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
+        let start, end;
+
+        if (cycle === 'Weekly') {
+            if (currentMonth.includes('-W')) {
+                const [year, weekStr] = currentMonth.split('-W');
+                const weekNum = parseInt(weekStr);
+                const firstDayOfYear = new Date(parseInt(year), 0, 1);
+                const daysToFirstMonday = (8 - firstDayOfYear.getDay()) % 7;
+                const firstMonday = new Date(parseInt(year), 0, 1 + daysToFirstMonday);
+                start = startOfWeek(addWeeks(firstMonday, weekNum - 1));
+                end = endOfWeek(start);
+            } else {
+                // Fallback context
+                const date = new Date(currentMonth + '-01');
+                start = startOfWeek(date);
+                end = endOfWeek(date);
+            }
+        } else if (cycle === 'Daily') {
+            start = startOfDay(new Date(currentMonth));
+            end = endOfDay(start);
+        } else {
+            // Monthly
+            const [year, month] = currentMonth.split('-');
+            const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+            start = startOfMonth(date);
+            end = endOfMonth(date);
+        }
 
         const workLogs = await WorkLog.find({
             user: req.user._id,
@@ -77,7 +101,7 @@ const getCurrentTimesheet = async (req, res) => {
             rejectionReason: log.rejectionReason
         }));
 
-        // Fetch Attendance for context (unchanged)
+        // Fetch Attendance for context
         const attendance = await Attendance.find({
             user: req.user._id,
             date: { $gte: start, $lte: end }
@@ -85,8 +109,8 @@ const getCurrentTimesheet = async (req, res) => {
 
         res.json({
             ...timesheet.toObject(),
-            userDetails: fullUser, // Distinct key to avoid collision
-            user: fullUser,        // Backup
+            userDetails: fullUser,
+            user: fullUser,
             entries,
             attendanceLog: attendance
         });
@@ -105,7 +129,10 @@ const addEntry = async (req, res) => {
     try {
         // 1. Resolve Target User
         let targetUserId = req.user._id;
-        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.create');
 
         if (userId && isAdmin) {
             targetUserId = userId;
@@ -117,10 +144,19 @@ const addEntry = async (req, res) => {
         }
 
         // Check for Existing Timesheet Logic
-        const month = format(new Date(entryDate), 'yyyy-MM');
+        const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
+        let periodId;
+        if (cycle === 'Weekly') {
+            periodId = format(new Date(entryDate), "yyyy-'W'II"); // ISO Week
+        } else if (cycle === 'Daily') {
+            periodId = format(new Date(entryDate), 'yyyy-MM-dd');
+        } else {
+            periodId = format(new Date(entryDate), 'yyyy-MM');
+        }
+
         const timesheet = await Timesheet.findOne({
             user: targetUserId,
-            month: month
+            month: periodId
         });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
@@ -205,8 +241,10 @@ const addEntry = async (req, res) => {
 // @route   POST /api/timesheet/submit
 // @access  Private
 const submitTimesheet = async (req, res) => {
-    const { month } = req.body;
+    const { month } = req.body; // In weekly/daily mode, this is the periodId (e.g. 2024-W12)
     try {
+        const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
+        
         const timesheet = await Timesheet.findOne({
             user: req.user._id,
             month: month
@@ -216,7 +254,11 @@ const submitTimesheet = async (req, res) => {
             return res.status(404).json({ message: 'Timesheet not found' });
         }
 
+        // For now, we allow the submission but we could add cycle-specific validations here
+        // (e.g. ensuring a weekly timesheet is only submitted at the end of the week)
+
         timesheet.status = 'SUBMITTED';
+        timesheet.submissionCycle = cycle;
         await timesheet.save();
 
         res.json(timesheet);
@@ -231,7 +273,7 @@ const submitTimesheet = async (req, res) => {
 // @access  Private
 const getProjects = async (req, res) => {
     try {
-        const projects = await Project.find({ isActive: true });
+        const projects = await Project.find({ companyId: req.companyId, isActive: true });
         res.json(projects);
     } catch (error) {
         console.error(error);
@@ -272,13 +314,16 @@ const getUserTimesheet = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || 
+             req.user.permissions?.includes('timesheet.view') ||
+             req.user.permissions?.includes('attendance.view');
+
         const isManager = targetUser.reportingManagers?.some(m => m.toString() === req.user._id.toString());
-        const hasRole = (name) => req.user.roles && req.user.roles.some(r => r.name === name);
-        const hasPermission = (key) => req.user.roles && req.user.roles.some(r => r.permissions && r.permissions.some(p => p.key === key));
 
-        const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve') || hasPermission('attendance.view') || hasPermission('timesheet.view');
-
-        if (!isManager && !isAdmin) {
+        if (!isManager && !isAdmin && targetUserId !== req.user._id.toString()) {
             return res.status(403).json({ message: 'Not authorized to view this timesheet' });
         }
 
@@ -374,7 +419,10 @@ const getPendingTimesheets = async (req, res) => {
 
         // Check if user is Admin
         // req.user.roles is populated with Role objects
-        const isAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Admin');
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.approve');
 
         if (isAdmin) {
             // Admin sees ALL submitted timesheets
@@ -453,9 +501,10 @@ const approveTimesheet = async (req, res) => {
         const targetUser = timesheet.user;
         const isManager = targetUser.reportingManagers?.some(m => m.toString() === req.user._id.toString());
 
-        const hasRole = (name) => req.user.roles && req.user.roles.some(r => r.name === name);
-        const hasPermission = (key) => req.user.roles && req.user.roles.some(r => r.permissions && r.permissions.some(p => p.key === key));
-        const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve');
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.approve');
 
         if (!isManager && !isAdmin) {
             return res.status(403).json({ message: 'Not authorized' });
@@ -521,7 +570,10 @@ const updateEntry = async (req, res) => {
 
         const isOwner = owner._id.toString() === requestor._id.toString();
         const isManager = owner.reportingManagers?.some(m => m.toString() === requestor._id.toString());
-        const isAdmin = requestor.roles && requestor.roles.some(r => r.name === 'Admin');
+        const isAdmin = requestor.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || requestor.permissions?.includes('*') || requestor.permissions?.includes('timesheet.update');
 
         if (!isOwner && !isManager && !isAdmin) {
             return res.status(403).json({ message: 'Not authorized' });

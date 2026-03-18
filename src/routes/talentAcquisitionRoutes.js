@@ -1,11 +1,15 @@
 const express = require('express');
+const { requireModule } = require('../middlewares/moduleGuard');
 const router = express.Router();
 const taController = require('../controllers/talentAcquisitionController');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/authorize');
+const { upload } = require('../config/cloudinary');
 
-// Base path: /api/ta
+router.use(protect);
+router.use(requireModule('talentAcquisition'));
 
+// Hiring Requests
 router.post('/hiring-request', protect, authorize('ta.create'), taController.createHiringRequest);
 router.get('/hiring-request', protect, taController.getHiringRequests);
 router.get('/hiring-request/:id', protect, taController.getHiringRequestById);
@@ -19,5 +23,8 @@ router.post('/hiring-request/transfer-candidate/:candidateId', protect, authoriz
 // Analytics
 router.get('/analytics/global', protect, taController.getGlobalAnalytics);
 router.get('/analytics/client/:clientName', protect, taController.getClientAnalytics);
+
+// File Uploads
+router.post('/hiring-request/upload-jd', protect, upload.single('jdFile'), taController.uploadJDFile);
 
 module.exports = router;

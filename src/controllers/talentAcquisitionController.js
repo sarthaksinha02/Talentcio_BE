@@ -626,6 +626,26 @@ exports.getPreviousCandidates = async (req, res) => {
     }
 };
 
+// --- uploadJDFile ---
+exports.uploadJDFile = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No file uploaded' });
+        }
+
+        // Return the secure URL from Cloudinary
+        res.status(200).json({
+            success: true,
+            message: 'File uploaded successfully',
+            fileUrl: req.file.path // This will be the Cloudinary secure_url created by multer-storage-cloudinary
+        });
+    } catch (error) {
+        console.error('Error uploading JD file:', error);
+        res.status(500).json({ success: false, message: 'Server Error during file upload', error: error.message });
+    }
+};
+
+
 // --- transferCandidate ---
 exports.transferCandidate = async (req, res) => {
     try {

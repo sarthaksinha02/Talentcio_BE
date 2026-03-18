@@ -6,6 +6,11 @@ const taskSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     module: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Module',

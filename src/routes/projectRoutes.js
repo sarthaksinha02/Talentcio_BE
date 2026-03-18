@@ -1,4 +1,5 @@
 const express = require('express');
+const { requireModule } = require('../middlewares/moduleGuard');
 const router = express.Router();
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/authorize');
@@ -12,6 +13,7 @@ const {
 } = require('../controllers/projectController');
 
 router.use(protect);
+router.use(requireModule('projectManagement'));
 
 // Helpers
 router.get('/employees', getEmployees);

@@ -1,4 +1,5 @@
 const express = require('express');
+const { requireModule } = require('../middlewares/moduleGuard');
 const router = express.Router();
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/authorize');
@@ -17,6 +18,7 @@ const {
 } = require('../controllers/timesheetController');
 
 router.use(protect); 
+router.use(requireModule(['timesheet', 'attendance']));
 
 router.get('/current', getCurrentTimesheet);
 router.get('/user/:userId', getUserTimesheet);

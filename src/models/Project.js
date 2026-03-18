@@ -6,6 +6,11 @@ const projectSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     client: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Client'

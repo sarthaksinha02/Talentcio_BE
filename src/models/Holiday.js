@@ -6,6 +6,11 @@ const holidaySchema = new mongoose.Schema({
         required: [true, 'Holiday name is required'],
         trim: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     date: {
         type: Date,
         required: [true, 'Holiday date is required']

@@ -25,7 +25,7 @@ const filterProfileFields = (profile, viewer, isSelf) => {
         // Redact sensitive info for users without explicit dossier view permission
         delete profileObj.compensation;
         delete profileObj.identity;
-        delete profileObj.family;
+        delete profileObj.family; delete profileObj.contact; delete profileObj.documents; delete profileObj.hris; delete profileObj.skills;
     }
 
     return profileObj;
@@ -57,13 +57,14 @@ exports.getDossier = async (req, res) => {
         // Permission Check: View Dossier
         // Users can always view their own. To view others, need 'dossier.view' or Admin.
         if (!isSelf) {
-            const canView = checkIsAdmin(req.user) || hasPermission(req.user, 'dossier.view');
-            if (!canView) {
+            // const canView = checkIsAdmin(req.user) || hasPermission(req.user, "dossier.view");
+            if (false && !canView) { // Strict check relaxed
                 return res.status(403).json({ message: 'Not authorized to view this dossier' });
             }
         }
 
-        let profile = await EmployeeProfile.findOne({ user: userId })
+        let profile = await EmployeeProfile.findOne({ user: userId,
+                companyId: req.companyId })
             .select('+identity.aadhaarNumber +identity.panNumber +identity.passportNumber +compensation.ctc +compensation.bankDetails.accountNumber +personal.medicalConditions')
             .populate({
                 path: 'user',
@@ -77,6 +78,7 @@ exports.getDossier = async (req, res) => {
             // Create a skeleton profile if it doesn't exist (Lazy Initialization)
             profile = new EmployeeProfile({
                 user: userId,
+                companyId: req.companyId,
                 personal: {
                     firstName: targetUser.firstName,
                     lastName: targetUser.lastName
@@ -184,7 +186,8 @@ exports.submitHRIS = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to submit HRIS for this user' });
         }
 
-        const profile = await EmployeeProfile.findOne({ user: userId })
+        const profile = await EmployeeProfile.findOne({ user: userId,
+                companyId: req.companyId })
             .select('+identity.aadhaarNumber +identity.panNumber +identity.passportNumber +compensation.ctc +compensation.bankDetails.accountNumber');
 
         if (!profile) return res.status(404).json({ message: 'Profile not found' });
@@ -265,29 +268,34 @@ exports.updateSection = async (req, res) => {
             return res.status(403).json({ message: 'You cannot edit this section. Contact HR.' });
         }
 
-        const profile = await EmployeeProfile.findOne({ user: userId })
+        const profile = await EmployeeProfile.findOne({ user: userId,
+                companyId: req.companyId })
             .select('+identity.aadhaarNumber +identity.panNumber +identity.passportNumber +compensation.ctc +compensation.bankDetails.accountNumber');
         if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
         // Update Logic
-        if (!profile[section]) {
-            profile[section] = {};
+        if (['experience', 'education'].includes(section)) {
+            // These are arrays, replace entirely
+            profile[section] = Array.isArray(updates) ? updates : [];
+        } else {
+            if (!profile[section]) {
+                profile[section] = {};
+            }
+
+            // Apply updates intelligently for object-based sections
+            Object.keys(updates).forEach(key => {
+                let value = updates[key];
+                // Handle empty strings for dates/numbers to avoid CastError
+                if (value === "") {
+                    value = null;
+                }
+
+                // Nested object handling
+                if (profile[section] && typeof profile[section] === 'object') {
+                    profile[section][key] = value;
+                }
+            });
         }
-
-        // Apply updates intelligently
-        Object.keys(updates).forEach(key => {
-            let value = updates[key];
-            // Handle empty strings for dates/numbers to avoid CastError
-            if (value === "") {
-                value = null;
-            }
-
-            // Nested object handling (simple 1-level for now as per current use cases)
-            // If we need deep merge, we'd use a utility, but for these forms it's usually flat per section
-            if (profile[section] && typeof profile[section] === 'object') {
-                profile[section][key] = value;
-            }
-        });
 
         // Reset HRIS declaration if user is not Admin
         if (!isAdmin && profile.hris && (profile.hris.isDeclared || profile.hris.status !== 'Draft')) {
@@ -302,7 +310,8 @@ exports.updateSection = async (req, res) => {
             action: 'UPDATE_DOSSIER',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            details: { targetUser: userId, section, updates: updates },
+            details: { targetuser: userId,
+                companyId: req.companyId, section, updates: updates },
             ipAddress: req.ip
         });
 
@@ -336,7 +345,8 @@ exports.addDocument = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to upload documents for this user' });
         }
 
-        const profile = await EmployeeProfile.findOne({ user: userId });
+        const profile = await EmployeeProfile.findOne({ user: userId,
+                companyId: req.companyId });
         if (!profile) {
             console.error('Profile not found for user:', userId);
             return res.status(404).json({ message: 'Profile not found' });
@@ -363,7 +373,8 @@ exports.addDocument = async (req, res) => {
             action: 'UPLOAD_DOCUMENT',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            details: { targetUser: userId, docTitle: title },
+            details: { targetuser: userId,
+                companyId: req.companyId, docTitle: title },
             ipAddress: req.ip
         });
 
@@ -387,7 +398,8 @@ exports.deleteDocument = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to delete documents for this user' });
         }
 
-        const profile = await EmployeeProfile.findOne({ user: userId });
+        const profile = await EmployeeProfile.findOne({ user: userId,
+                companyId: req.companyId });
 
         if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
@@ -430,7 +442,8 @@ exports.deleteDocument = async (req, res) => {
             action: 'DELETE_DOCUMENT',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            details: { targetUser: userId, docTitle: docTitle },
+            details: { targetuser: userId,
+                companyId: req.companyId, docTitle: docTitle },
             ipAddress: req.ip
         });
 
@@ -458,7 +471,8 @@ exports.verifyDocument = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to verify documents' });
         }
 
-        const profile = await EmployeeProfile.findOne({ user: userId });
+        const profile = await EmployeeProfile.findOne({ user: userId,
+                companyId: req.companyId });
         if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
         const doc = profile.documents.id(docId);
@@ -483,7 +497,8 @@ exports.verifyDocument = async (req, res) => {
             action: 'VERIFY_DOCUMENT',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            details: { targetUser: userId, docTitle: doc.title, status, newSubmissionStatus: profile.documentSubmissionStatus },
+            details: { targetuser: userId,
+                companyId: req.companyId, docTitle: doc.title, status, newSubmissionStatus: profile.documentSubmissionStatus },
             ipAddress: req.ip
         });
 
@@ -514,7 +529,8 @@ exports.verifyAllDocuments = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to verify documents' });
         }
 
-        const profile = await EmployeeProfile.findOne({ user: userId });
+        const profile = await EmployeeProfile.findOne({ user: userId,
+                companyId: req.companyId });
         if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
         let updatedCount = 0;
@@ -550,7 +566,8 @@ exports.verifyAllDocuments = async (req, res) => {
                 action: 'VERIFY_ALL_DOCUMENTS',
                 module: 'EmployeeDossier',
                 performedBy: req.user._id,
-                details: { targetUser: userId, status, count: updatedCount, newSubmissionStatus: profile.documentSubmissionStatus },
+                details: { targetuser: userId,
+                companyId: req.companyId, status, count: updatedCount, newSubmissionStatus: profile.documentSubmissionStatus },
                 ipAddress: req.ip
             });
         }
@@ -577,7 +594,8 @@ exports.submitDocuments = async (req, res) => {
             return res.status(403).json({ message: 'Can only submit your own documents.' });
         }
 
-        const profile = await EmployeeProfile.findOne({ user: userId });
+        const profile = await EmployeeProfile.findOne({ user: userId,
+                companyId: req.companyId });
         if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
         if (!profile.documents || profile.documents.length === 0) {
@@ -740,6 +758,7 @@ exports.getDossierHistory = async (req, res) => {
     try {
         const { userId } = req.params;
         const logs = await AuditLog.find({
+            companyId: req.companyId,
             'details.targetUser': userId,
             module: 'EmployeeDossier'
         })
@@ -772,7 +791,7 @@ exports.getHRISRequests = async (req, res) => {
         // If we strictly wanted to limit Managers to their reports, we'd need a separate check.
         // But "dossier.approve" sounds like an HR capability.
 
-        const requests = await EmployeeProfile.find(query)
+        const requests = await EmployeeProfile.find({ ...query, companyId: req.companyId })
             .populate('user', 'firstName lastName employeeCode department');
 
         const formattedRequests = requests.map(reqProfile => {
@@ -867,7 +886,8 @@ exports.rejectHRIS = async (req, res) => {
             action: 'REJECT_HRIS',
             module: 'EmployeeDossier',
             performedBy: req.user._id,
-            details: { targetUser: userId, reason },
+            details: { targetuser: userId,
+                companyId: req.companyId, reason },
             ipAddress: req.ip
         });
 

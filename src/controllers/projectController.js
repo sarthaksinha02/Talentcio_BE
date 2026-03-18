@@ -10,7 +10,7 @@ const User = require('../models/User');
 // --- Employees (Helper for Dropdowns) ---
 const getEmployees = async (req, res) => {
     try {
-        const users = await User.find({})
+        const users = await User.find({ companyId: req.companyId })
             .select('firstName lastName email');
         res.json(users);
     } catch (error) {
@@ -21,7 +21,7 @@ const getEmployees = async (req, res) => {
 // --- Business Units ---
 const getBusinessUnits = async (req, res) => {
     try {
-        const units = await BusinessUnit.find({})
+        const units = await BusinessUnit.find({ companyId: req.companyId })
             .populate('headOfUnit', 'firstName lastName');
         res.json(units);
     } catch (error) {
@@ -31,7 +31,7 @@ const getBusinessUnits = async (req, res) => {
 
 const createBusinessUnit = async (req, res) => {
     try {
-        const unit = await BusinessUnit.create({ ...req.body });
+        const unit = await BusinessUnit.create({ ...req.body, companyId: req.companyId });
         res.status(201).json(unit);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -40,8 +40,7 @@ const createBusinessUnit = async (req, res) => {
 
 const updateBusinessUnit = async (req, res) => {
     try {
-        const unit = await BusinessUnit.findOneAndUpdate(
-            { _id: req.params.id },
+        const unit = await BusinessUnit.findOneAndUpdate({ _id: req.params.id, companyId: req.companyId },
             req.body,
             { new: true }
         );
@@ -55,7 +54,7 @@ const updateBusinessUnit = async (req, res) => {
 // --- Clients ---
 const getClients = async (req, res) => {
     try {
-        const clients = await Client.find({})
+        const clients = await Client.find({ companyId: req.companyId })
             .populate('businessUnit', 'name');
         res.json(clients);
     } catch (error) {
@@ -65,7 +64,7 @@ const getClients = async (req, res) => {
 
 const createClient = async (req, res) => {
     try {
-        const client = await Client.create({ ...req.body });
+        const client = await Client.create({ ...req.body, companyId: req.companyId });
         res.status(201).json(client);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -74,8 +73,7 @@ const createClient = async (req, res) => {
 
 const updateClient = async (req, res) => {
     try {
-        const client = await Client.findOneAndUpdate(
-            { _id: req.params.id },
+        const client = await Client.findOneAndUpdate({ _id: req.params.id, companyId: req.companyId },
             req.body,
             { new: true }
         );
@@ -92,7 +90,7 @@ const getProjects = async (req, res) => {
         // If user is basic employee, maybe we want to filter? 
         // For now, adhering to 'project.read' permission check in route.
         // If Admin, fetch all. If not, fetch only assigned projects (manager, member, or has assigned task)
-        let query = {};
+        let query = { companyId: req.companyId };
 
         // Check if user is Admin
         // Check if user is Admin or has global read permission
@@ -108,8 +106,8 @@ const getProjects = async (req, res) => {
             const orConditions = [];
 
             // 1. Assigned Projects (Manager, Member, or Task Assigned)
-            const assignedModuleIds = await Task.distinct('module', { assignees: req.user._id });
-            const taskProjectIds = await Module.distinct('project', { _id: { $in: assignedModuleIds } });
+            const assignedModuleIds = await Task.distinct('module', { assignees: req.user._id, companyId: req.companyId });
+            const taskProjectIds = await Module.distinct('project', { _id: { $in: assignedModuleIds }, companyId: req.companyId });
 
             orConditions.push({ manager: req.user._id });
             orConditions.push({ members: req.user._id });
@@ -117,15 +115,15 @@ const getProjects = async (req, res) => {
 
             // 2. Team Projects
             if (canViewTeam) {
-                const directReports = await User.find({ reportingManagers: req.user._id }).select('_id');
+                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
                 const reportIds = directReports.map(u => u._id);
 
                 if (reportIds.length > 0) {
                     orConditions.push({ manager: { $in: reportIds } });
                     orConditions.push({ members: { $in: reportIds } });
 
-                    const teamAssignedModuleIds = await Task.distinct('module', { assignees: { $in: reportIds } });
-                    const teamTaskProjectIds = await Module.distinct('project', { _id: { $in: teamAssignedModuleIds } });
+                    const teamAssignedModuleIds = await Task.distinct('module', { assignees: { $in: reportIds }, companyId: req.companyId });
+                    const teamTaskProjectIds = await Module.distinct('project', { _id: { $in: teamAssignedModuleIds }, companyId: req.companyId });
                     orConditions.push({ _id: { $in: teamTaskProjectIds } });
                 }
             }
@@ -150,7 +148,7 @@ const getProjects = async (req, res) => {
 const getProjectHierarchy = async (req, res) => {
     try {
         const { id } = req.params;
-        const project = await Project.findById(id)
+        const project = await Project.findOne({ _id: id, companyId: req.companyId })
             .populate('client', 'name')
             .populate('manager', 'firstName lastName')
             .populate('members', '_id'); // Need IDs to check membership
@@ -176,21 +174,18 @@ const getProjectHierarchy = async (req, res) => {
         let hasAccess = canViewAll || isManager || isMember;
 
         if (!hasAccess) {
-            const projectModules = await Module.find({ project: id }).select('_id');
+            const projectModules = await Module.find({ project: id, companyId: req.companyId }).select('_id');
             const projectModuleIds = projectModules.map(m => m._id);
 
             // 1. Check Assigned Task
             if (canViewAssigned || canViewTeam) {
-                const assignedTask = await Task.findOne({
-                    module: { $in: projectModuleIds },
-                    assignees: req.user._id
-                });
+                const assignedTask = await Task.findOne({ module: { $in: projectModuleIds }, assignees: req.user._id, companyId: req.companyId });
                 if (assignedTask) hasAccess = true;
             }
 
             // 2. Check Team Access
             if (!hasAccess && canViewTeam) {
-                const directReports = await User.find({ reportingManagers: req.user._id }).select('_id');
+                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
                 const reportIds = directReports.map(u => u._id.toString());
 
                 if (reportIds.length > 0) {
@@ -202,10 +197,7 @@ const getProjectHierarchy = async (req, res) => {
                         hasAccess = true;
                     } else {
                         // Check if report has task
-                        const teamTask = await Task.findOne({
-                            module: { $in: projectModuleIds },
-                            assignees: { $in: reportIds }
-                        });
+                        const teamTask = await Task.findOne({ module: { $in: projectModuleIds }, assignees: { $in: reportIds }, companyId: req.companyId });
                         if (teamTask) hasAccess = true;
                     }
                 }
@@ -218,7 +210,7 @@ const getProjectHierarchy = async (req, res) => {
 
 
 
-        const modules = await Module.find({ project: id }).sort({ startDate: 1 });
+        const modules = await Module.find({ project: id, companyId: req.companyId }).sort({ startDate: 1 });
 
         // Fetch all tasks for these modules
         const moduleIds = modules.map(m => m._id);
@@ -255,7 +247,7 @@ const getProjectHierarchy = async (req, res) => {
         // I will hide ALL logs if not authorized.
 
         if (canViewWorkLogs || isManager || isMember) {
-            workLogs = await WorkLog.find({ task: { $in: taskIds } })
+            workLogs = await WorkLog.find({ task: { $in: taskIds }, companyId: req.companyId })
                 .populate('user', 'firstName lastName')
                 .sort({ date: -1 });
         } else {
@@ -292,7 +284,7 @@ const getProjectHierarchy = async (req, res) => {
 
 const createProject = async (req, res) => {
     try {
-        const project = await Project.create({ ...req.body });
+        const project = await Project.create({ ...req.body, companyId: req.companyId });
         res.status(201).json(project);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -301,8 +293,7 @@ const createProject = async (req, res) => {
 
 const updateProject = async (req, res) => {
     try {
-        const project = await Project.findOneAndUpdate(
-            { _id: req.params.id },
+        const project = await Project.findOneAndUpdate({ _id: req.params.id, companyId: req.companyId },
             req.body,
             { new: true }
         );
@@ -315,23 +306,23 @@ const updateProject = async (req, res) => {
 
 const deleteProject = async (req, res) => {
     try {
-        const project = await Project.findOneAndDelete({ _id: req.params.id });
+        const project = await Project.findOneAndDelete({ _id: req.params.id, companyId: req.companyId });
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
         // Cascade Delete
-        const modules = await Module.find({ project: project._id });
+        const modules = await Module.find({ project: project._id, companyId: req.companyId });
         const moduleIds = modules.map(m => m._id);
 
         if (moduleIds.length > 0) {
-            const tasks = await Task.find({ module: { $in: moduleIds } });
+            const tasks = await Task.find({ module: { $in: moduleIds }, companyId: req.companyId });
             const taskIds = tasks.map(t => t._id);
 
             const WorkLog = require('../models/WorkLog');
             if (taskIds.length > 0) {
-                await WorkLog.deleteMany({ task: { $in: taskIds } });
+                await WorkLog.deleteMany({ task: { $in: taskIds }, companyId: req.companyId });
             }
-            await Task.deleteMany({ module: { $in: moduleIds } });
-            await Module.deleteMany({ project: project._id });
+            await Task.deleteMany({ module: { $in: moduleIds }, companyId: req.companyId });
+            await Module.deleteMany({ project: project._id, companyId: req.companyId });
         }
 
         res.json({ message: 'Project and associated data deleted' });
@@ -346,7 +337,7 @@ const getModules = async (req, res) => {
         const { projectId } = req.params;
 
         // Security Check: Implicit Access
-        const project = await Project.findById(projectId);
+        const project = await Project.findOne({ _id: projectId, companyId: req.companyId });
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
         const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
@@ -366,21 +357,18 @@ const getModules = async (req, res) => {
         let hasAccess = canViewAll || isManager || isMember;
 
         if (!hasAccess) {
-            const modules = await Module.find({ project: projectId }).select('_id');
+            const modules = await Module.find({ project: projectId, companyId: req.companyId }).select('_id');
             const moduleIds = modules.map(m => m._id);
 
             // 1. Check Assigned Task
             if (canViewAssigned || canViewTeam) {
-                const assignedTask = await Task.findOne({
-                    module: { $in: moduleIds },
-                    assignees: req.user._id
-                });
+                const assignedTask = await Task.findOne({ module: { $in: moduleIds }, assignees: req.user._id, companyId: req.companyId });
                 if (assignedTask) hasAccess = true;
             }
 
             // 2. Check Team Access
             if (!hasAccess && canViewTeam) {
-                const directReports = await User.find({ reportingManagers: req.user._id }).select('_id');
+                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
                 const reportIds = directReports.map(u => u._id.toString());
                 if (reportIds.length > 0) {
                     const reportIsManager = project.manager && reportIds.includes(project.manager.toString());
@@ -388,10 +376,7 @@ const getModules = async (req, res) => {
                     if (reportIsManager || reportIsMember) {
                         hasAccess = true;
                     } else {
-                        const teamTask = await Task.findOne({
-                            module: { $in: moduleIds },
-                            assignees: { $in: reportIds }
-                        });
+                        const teamTask = await Task.findOne({ module: { $in: moduleIds }, assignees: { $in: reportIds }, companyId: req.companyId });
                         if (teamTask) hasAccess = true;
                     }
                 }
@@ -402,7 +387,7 @@ const getModules = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to view modules for this project' });
         }
 
-        const modules = await Module.find({ project: projectId });
+        const modules = await Module.find({ project: projectId, companyId: req.companyId });
         res.json(modules);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -411,7 +396,7 @@ const getModules = async (req, res) => {
 
 const createModule = async (req, res) => {
     try {
-        const module = await Module.create(req.body);
+        const module = await Module.create({ ...req.body, companyId: req.companyId });
         res.status(201).json(module);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -420,7 +405,7 @@ const createModule = async (req, res) => {
 
 const updateModule = async (req, res) => {
     try {
-        const module = await Module.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const module = await Module.findOneAndUpdate({ _id: req.params.id, companyId: req.companyId }, req.body, { new: true });
         if (!module) return res.status(404).json({ message: 'Module not found' });
         res.json(module);
     } catch (error) {
@@ -430,18 +415,18 @@ const updateModule = async (req, res) => {
 
 const deleteModule = async (req, res) => {
     try {
-        const module = await Module.findByIdAndDelete(req.params.id);
+        const module = await Module.findOneAndDelete({ _id: req.params.id, companyId: req.companyId });
         if (!module) return res.status(404).json({ message: 'Module not found' });
 
         // Cascade Delete
-        const tasks = await Task.find({ module: module._id });
+        const tasks = await Task.find({ module: module._id, companyId: req.companyId });
         const taskIds = tasks.map(t => t._id);
 
         const WorkLog = require('../models/WorkLog');
         if (taskIds.length > 0) {
-            await WorkLog.deleteMany({ task: { $in: taskIds } });
+            await WorkLog.deleteMany({ task: { $in: taskIds }, companyId: req.companyId });
         }
-        await Task.deleteMany({ module: module._id });
+        await Task.deleteMany({ module: module._id, companyId: req.companyId });
 
         res.json({ message: 'Module and tasks deleted' });
     } catch (error) {
@@ -453,7 +438,7 @@ const deleteModule = async (req, res) => {
 const getTasks = async (req, res) => {
     try {
         // Can filter by module or assignee
-        const query = {};
+        const query = { companyId: req.companyId };
         if (req.query.moduleId) query.module = req.query.moduleId;
         if (req.query.assignees) query.assignees = req.query.assignees; // Check assignees array
 
@@ -465,7 +450,7 @@ const getTasks = async (req, res) => {
             // If not admin/global reader, restrict.
             // If querying by module, check project access
             if (req.query.moduleId) {
-                const module = await Module.findById(req.query.moduleId).populate('project');
+                const module = await Module.findOne({ _id: req.query.moduleId, companyId: req.companyId }).populate('project');
                 if (module && module.project) {
                     const project = module.project;
                     const isManager = project.manager?.toString() === req.user._id.toString();
@@ -503,7 +488,7 @@ const getTasks = async (req, res) => {
 
 const createTask = async (req, res) => {
     try {
-        const task = await Task.create(req.body);
+        const task = await Task.create({ ...req.body, companyId: req.companyId });
         res.status(201).json(task);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -512,7 +497,7 @@ const createTask = async (req, res) => {
 
 const updateTask = async (req, res) => {
     try {
-        const task = await Task.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const task = await Task.findOneAndUpdate({ _id: req.params.id, companyId: req.companyId }, req.body, { new: true });
         if (!task) return res.status(404).json({ message: 'Task not found' });
         res.json(task);
     } catch (error) {
@@ -522,11 +507,11 @@ const updateTask = async (req, res) => {
 
 const deleteTask = async (req, res) => {
     try {
-        const task = await Task.findByIdAndDelete(req.params.id);
+        const task = await Task.findOneAndDelete({ _id: req.params.id, companyId: req.companyId });
         if (!task) return res.status(404).json({ message: 'Task not found' });
 
         const WorkLog = require('../models/WorkLog');
-        await WorkLog.deleteMany({ task: task._id });
+        await WorkLog.deleteMany({ task: task._id, companyId: req.companyId });
 
         res.json({ message: 'Task deleted' });
     } catch (error) {

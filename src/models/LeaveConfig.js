@@ -4,8 +4,13 @@ const leaveConfigSchema = new mongoose.Schema({
     leaveType: {
         type: String,
         required: true,
-        enum: ['CL', 'SL', 'EL', 'LOP', 'WFH'],
-        unique: true
+        trim: true
+    },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        required: true,
+        index: true
     },
     name: {
         type: String,
@@ -37,10 +42,6 @@ const leaveConfigSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    encashmentAllowed: {
-        type: Boolean,
-        default: false
-    },
     maxLimitPerYear: {
         type: Number,
         default: 0
@@ -71,5 +72,8 @@ const leaveConfigSchema = new mongoose.Schema({
         default: true
     }
 }, { timestamps: true });
+
+// Ensure leave types are unique per company
+leaveConfigSchema.index({ leaveType: 1, companyId: 1 }, { unique: true });
 
 module.exports = mongoose.model('LeaveConfig', leaveConfigSchema);

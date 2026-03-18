@@ -55,6 +55,23 @@ const userSchema = new mongoose.Schema({
     tokenVersion: {
         type: Number,
         default: 0
+    },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
+    isPasswordResetRequired: {
+        type: Boolean,
+        default: true
+    },
+    otp: {
+        type: String,
+        default: null
+    },
+    otpExpires: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 
