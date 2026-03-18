@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const axios = require('axios');
 
 /**
  * Configure the transporter using Brevo SMTP.
@@ -22,10 +23,38 @@ const getTransporter = () => {
 };
 
 /**
- * Generic function to send an email
+ * Generic function to send an email (Supports Brevo API and SMTP)
  */
 const sendEmail = async ({ to, subject, html, text }) => {
-    if (!process.env.EMAIL_USER || !(process.env.EMAIL_PASS || process.env.BREVO_API_KEY)) {
+    const apiKey = process.env.BREVO_API_KEY || process.env.EMAIL_PASS;
+    const fromEmail = process.env.EMAIL_FROM || 'no-reply@talentcio.com';
+
+    // 1. Try Brevo HTTP API first (Most reliable for production/Render)
+    if (apiKey && apiKey.startsWith('xkeysib-')) {
+        try {
+            console.log(`[EMAIL] Attempting to send via Brevo API: ${to}`);
+            const response = await axios.post('https://api.brevo.com/v3/smtp/email', {
+                sender: { name: 'TalentCio', email: fromEmail },
+                to: [{ email: to }],
+                subject: subject,
+                htmlContent: html,
+                textContent: text
+            }, {
+                headers: {
+                    'api-key': apiKey,
+                    'Content-Type': 'application/json'
+                }
+            });
+            console.log(`[EMAIL] API Success: ${response.data.messageId}`);
+            return true;
+        } catch (apiError) {
+            console.error('[EMAIL] Brevo API Failed, trying SMTP fallback:', apiError.response?.data || apiError.message);
+            // Fall through to SMTP
+        }
+    }
+
+    // 2. Fallback to Nodemailer SMTP
+    if (!process.env.EMAIL_USER || !apiKey) {
         console.error('Email credentials missing. Skipping email send.');
         return false;
     }
@@ -33,16 +62,16 @@ const sendEmail = async ({ to, subject, html, text }) => {
     try {
         const transporter = getTransporter();
         const info = await transporter.sendMail({
-            from: `"TalentCio" <${process.env.EMAIL_FROM || 'no-reply@talentcio.com'}>`,
+            from: `"TalentCio" <${fromEmail}>`,
             to,
             subject,
             html,
             text
         });
-        console.log(`Email sent successfully: ${info.messageId}`);
+        console.log(`[EMAIL] SMTP Success: ${info.messageId}`);
         return true;
     } catch (error) {
-        console.error('Email send failed:', error.message);
+        console.error('[EMAIL] SMTP Failed:', error.message);
         return false;
     }
 };
