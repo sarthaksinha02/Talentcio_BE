@@ -35,19 +35,30 @@ async function migrate() {
         console.log('Connected to Database.');
 
         // 1. Find the company that currently holds the migrated data, or grab the first one
-        let defaultCompany;
-        const attachedUser = await User.findOne({ companyId: { $exists: true } });
-        if (attachedUser) {
-            defaultCompany = await Company.findById(attachedUser.companyId);
-        } else {
-            defaultCompany = await Company.findOne();
-        }
-
-        const targetSubdomain = "telentcio"; // Matches telentcio.vercel.app
+        const targetSubdomain = "telentcio"; 
         const companyName = "ilumaa";
 
-        if (!defaultCompany) {
-            defaultCompany = await Company.create({
+        // 1. Find the company that holds actual user data
+        let attachedCompany;
+        const attachedUser = await User.findOne({ companyId: { $exists: true } });
+        if (attachedUser) {
+            attachedCompany = await Company.findById(attachedUser.companyId);
+        } else {
+            attachedCompany = await Company.findOne(); // Fallback if no users have companyId yet
+        }
+
+        // 2. Check if the target 'telentcio' company exists and is DIFFERENT from the attached one
+        const existingTargetCompany = await Company.findOne({ subdomain: targetSubdomain });
+
+        if (existingTargetCompany && attachedCompany && existingTargetCompany._id.toString() !== attachedCompany._id.toString()) {
+            // An empty company was created previously with this subdomain. We need to delete it so we can give its subdomain to the real company.
+            console.log(`Deleting empty duplicate company with subdomain '${targetSubdomain}' to make room for data migration.`);
+            await Company.findByIdAndDelete(existingTargetCompany._id);
+        }
+
+        // 3. Now safely update the real attached company
+        if (!attachedCompany) {
+            attachedCompany = await Company.create({
                 name: companyName,
                 subdomain: targetSubdomain,
                 email: "admin@ilumaa.com",
@@ -57,14 +68,15 @@ async function migrate() {
                     attendance: { workingHours: 8, weeklyOff: ['Saturday', 'Sunday'] }
                 }
             });
-            console.log(`Created Default Company: ${defaultCompany.name} (ID: ${defaultCompany._id})`);
+            console.log(`Created Default Company: ${attachedCompany.name} (ID: ${attachedCompany._id})`);
         } else {
-            // We forcefully update this specific company to have the correct name and subdomain
-            defaultCompany.name = companyName;
-            defaultCompany.subdomain = targetSubdomain;
-            await defaultCompany.save();
-            console.log(`Updated existing Company ${defaultCompany._id} to name: ${defaultCompany.name}, subdomain: ${defaultCompany.subdomain}`);
+            attachedCompany.name = companyName;
+            attachedCompany.subdomain = targetSubdomain;
+            await attachedCompany.save();
+            console.log(`Updated real Company ${attachedCompany._id} to name: ${attachedCompany.name}, subdomain: ${attachedCompany.subdomain}`);
         }
+
+        const defaultCompany = attachedCompany;
 
         // 2. All Models that require companyId association
         const modelsToUpdate = [
