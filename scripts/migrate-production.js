@@ -37,7 +37,8 @@ async function migrate() {
         // 1. Create or Find the default company (Tenant)
         const subdomain = "telentcio"; // Matches telentcio.vercel.app
         let defaultCompany = await Company.findOne({ subdomain });
-        
+
+
         if (!defaultCompany) {
             defaultCompany = await Company.create({
                 name: "Primary Company",
@@ -80,7 +81,7 @@ async function migrate() {
         console.log('\n--- Syncing Data with Company ID ---');
         for (const { name, model } of modelsToUpdate) {
             const result = await model.updateMany(
-                { companyId: { $exists: false } }, 
+                { companyId: { $exists: false } },
                 { $set: { companyId: defaultCompany._id } }
             );
             console.log(`Associated ${result.modifiedCount} ${name} records.`);
