@@ -35,7 +35,7 @@ async function migrate() {
         console.log('Connected to Database.');
 
         // 1. Create or Find the default company (Tenant)
-        const subdomain = "app"; // Your primary subdomain
+        const subdomain = "telentcio"; // Matches telentcio.vercel.app
         let defaultCompany = await Company.findOne({ subdomain });
         
         if (!defaultCompany) {
