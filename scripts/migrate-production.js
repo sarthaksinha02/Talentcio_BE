@@ -34,11 +34,17 @@ async function migrate() {
         await mongoose.connect(uri);
         console.log('Connected to Database.');
 
-        // 1. Create or Find the default company (Tenant)
+        // 1. Find the company that currently holds the migrated data, or grab the first one
+        let defaultCompany;
+        const attachedUser = await User.findOne({ companyId: { $exists: true } });
+        if (attachedUser) {
+            defaultCompany = await Company.findById(attachedUser.companyId);
+        } else {
+            defaultCompany = await Company.findOne();
+        }
+
         const targetSubdomain = "telentcio"; // Matches telentcio.vercel.app
         const companyName = "ilumaa";
-
-        let defaultCompany = await Company.findOne({ subdomain: targetSubdomain });
 
         if (!defaultCompany) {
             defaultCompany = await Company.create({
@@ -53,13 +59,11 @@ async function migrate() {
             });
             console.log(`Created Default Company: ${defaultCompany.name} (ID: ${defaultCompany._id})`);
         } else {
-            // Update name to 'ilumaa' if it's currently 'Primary Company'
-            if (defaultCompany.name !== companyName) {
-                defaultCompany.name = companyName;
-                await defaultCompany.save();
-                console.log(`Renamed existing Company to: ${defaultCompany.name}`);
-            }
-            console.log(`Using existing Company: ${defaultCompany.name} (ID: ${defaultCompany._id})`);
+            // We forcefully update this specific company to have the correct name and subdomain
+            defaultCompany.name = companyName;
+            defaultCompany.subdomain = targetSubdomain;
+            await defaultCompany.save();
+            console.log(`Updated existing Company ${defaultCompany._id} to name: ${defaultCompany.name}, subdomain: ${defaultCompany.subdomain}`);
         }
 
         // 2. All Models that require companyId association
