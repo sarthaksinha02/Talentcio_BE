@@ -48,9 +48,10 @@ const protect = async (req, res, next) => {
                 });
             }
 
-            // Sync companyId from user if not set by tenantMiddleware (fallback for localhost/standalone)
-            if (!req.companyId && req.user.companyId) {
-                req.companyId = req.user.companyId;
+            // Sync req.company if it was resolved by tenantMiddleware
+            // (already handled in tenantMiddleware, but good to keep reference here)
+            if (req.companyId && !req.user.companyId) {
+                 // Guest or newly registered user? Still scoped to this companyId
             }
 
             if (!req.user) {
