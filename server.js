@@ -81,6 +81,7 @@ require('./src/models/SuperAdminUser');
 const syncPermissions = require('./src/services/permissionSync');
 const startEscalationCron = require('./src/services/escalationCron');
 const startAutoCheckoutCron = require('./src/services/attendanceAutoCheckoutCron');
+const cleanupStaleIndexes = require('./src/services/indexCleanup');
 
 // Routes
 const authRoutes = require('./src/routes/authRoutes');
@@ -115,6 +116,7 @@ const tenantMiddleware = require('./src/middlewares/tenantMiddleware');
 // Database Connection & Init
 const initServer = async () => {
     await connectDB();
+    await cleanupStaleIndexes();
     await syncPermissions();
     startEscalationCron(io); // Start the background Helpdesk escalation job
     startAutoCheckoutCron(); // Start the background auto-checkout job
