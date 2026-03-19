@@ -18,7 +18,8 @@ const getCurrentTimesheet = async (req, res) => {
 
         let timesheet = await Timesheet.findOne({
             user: req.user._id,
-            month: currentMonth
+            month: currentMonth,
+            companyId: req.companyId
         });
 
         if (!timesheet) {
@@ -26,6 +27,7 @@ const getCurrentTimesheet = async (req, res) => {
             timesheet = await Timesheet.create({
                 user: req.user._id,
                 month: currentMonth,
+                companyId: req.companyId,
                 status: 'DRAFT',
                 rejectionReason: ''
             });
@@ -79,6 +81,7 @@ const getCurrentTimesheet = async (req, res) => {
 
         const workLogs = await WorkLog.find({
             user: req.user._id,
+            companyId: req.companyId,
             date: { $gte: start, $lte: end }
         }).populate({
             path: 'task',
@@ -104,6 +107,7 @@ const getCurrentTimesheet = async (req, res) => {
         // Fetch Attendance for context
         const attendance = await Attendance.find({
             user: req.user._id,
+            companyId: req.companyId,
             date: { $gte: start, $lte: end }
         }).select('date clockInIST clockOutIST duration clockIn clockOut');
 
@@ -156,7 +160,8 @@ const addEntry = async (req, res) => {
 
         const timesheet = await Timesheet.findOne({
             user: targetUserId,
-            month: periodId
+            month: periodId,
+            companyId: req.companyId
         });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
@@ -203,6 +208,7 @@ const addEntry = async (req, res) => {
         const workLog = new WorkLog({
             user: targetUserId,
             date: entryDate,
+            companyId: req.companyId,
             task: taskId, // This implies taskId is required. 
             // If we support Project-only logs, we'd need a Task to hold it (e.g. "General Task" under project)
             // But WorkLog schema likely has 'task' as ref. 
@@ -247,7 +253,8 @@ const submitTimesheet = async (req, res) => {
         
         const timesheet = await Timesheet.findOne({
             user: req.user._id,
-            month: month
+            month: month,
+            companyId: req.companyId
         });
 
         if (!timesheet) {
@@ -287,7 +294,8 @@ const getProjects = async (req, res) => {
 const createProject = async (req, res) => {
     try {
         const project = await Project.create({
-            ...req.body
+            ...req.body,
+            companyId: req.companyId
         });
         res.json(project);
     } catch (error) {
@@ -308,7 +316,7 @@ const getUserTimesheet = async (req, res) => {
         if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
 
         // 1. Check Permissions
-        const targetUser = await User.findById(targetUserId);
+        const targetUser = await User.findOne({ _id: targetUserId, companyId: req.companyId });
 
         if (!targetUser) {
             return res.status(404).json({ message: 'User not found' });
@@ -329,7 +337,8 @@ const getUserTimesheet = async (req, res) => {
 
         let timesheet = await Timesheet.findOne({
             user: targetUserId,
-            month: currentMonth
+            month: currentMonth,
+            companyId: req.companyId
         });
 
         // Fetch WorkLogs
@@ -347,6 +356,7 @@ const getUserTimesheet = async (req, res) => {
 
         const workLogs = await WorkLog.find({
             user: targetUserId,
+            companyId: req.companyId,
             date: { $gte: start, $lte: end }
         }).populate({
             path: 'task',
@@ -377,7 +387,7 @@ const getUserTimesheet = async (req, res) => {
         // Ensure user is attached
         let fullTargetUser = null;
         try {
-            fullTargetUser = await User.findById(targetUserId)
+            fullTargetUser = await User.findOne({ _id: targetUserId, companyId: req.companyId })
                 .select('firstName lastName email employeeCode')
                 .populate('reportingManagers', 'firstName lastName email');
         } catch (err) {
@@ -392,6 +402,7 @@ const getUserTimesheet = async (req, res) => {
 
         const attendance = await Attendance.find({
             user: targetUserId,
+            companyId: req.companyId,
             date: { $gte: start, $lte: end }
         }).select('date clockInIST clockOutIST clockIn clockOut duration');
 
@@ -427,17 +438,19 @@ const getPendingTimesheets = async (req, res) => {
         if (isAdmin) {
             // Admin sees ALL submitted timesheets
             timesheets = await Timesheet.find({
-                status: 'SUBMITTED'
+                status: 'SUBMITTED',
+                companyId: req.companyId
             }).populate('user', 'firstName lastName email employeeCode')
                 .sort({ month: -1 });
         } else {
             // Regular Manager: Find subordinates (where I am one of the reporting managers)
-            const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
+            const subordinates = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
             const subordinateIds = subordinates.map(u => u._id);
 
             timesheets = await Timesheet.find({
                 user: { $in: subordinateIds },
-                status: 'SUBMITTED'
+                status: 'SUBMITTED',
+                companyId: req.companyId
             }).populate('user', 'firstName lastName email employeeCode')
                 .sort({ month: -1 });
         }
@@ -450,6 +463,7 @@ const getPendingTimesheets = async (req, res) => {
 
             const workLogs = await WorkLog.find({
                 user: ts.user._id,
+                companyId: req.companyId,
                 date: { $gte: start, $lte: end }
             }).populate({
                 path: 'task',
@@ -491,7 +505,7 @@ const getPendingTimesheets = async (req, res) => {
 const approveTimesheet = async (req, res) => {
     const { status, reason, type = 'FULL', rejectedEntryIds = [] } = req.body;
     try {
-        const timesheet = await Timesheet.findById(req.params.id)
+        const timesheet = await Timesheet.findOne({ _id: req.params.id, companyId: req.companyId })
             .populate('user', 'reportingManagers');
 
         if (!timesheet) {
@@ -521,7 +535,7 @@ const approveTimesheet = async (req, res) => {
 
             if (rejectedEntryIds.length > 0) {
                 await WorkLog.updateMany(
-                    { _id: { $in: rejectedEntryIds } },
+                    { _id: { $in: rejectedEntryIds }, companyId: req.companyId },
                     { $set: { status: 'REJECTED', rejectionReason: reason } }
                 );
             }
@@ -538,6 +552,7 @@ const approveTimesheet = async (req, res) => {
             await WorkLog.updateMany(
                 {
                     user: targetUser._id,
+                    companyId: req.companyId,
                     date: { $gte: start, $lte: end }
                 },
                 { $set: updateDoc }
@@ -559,7 +574,7 @@ const approveTimesheet = async (req, res) => {
 const updateEntry = async (req, res) => {
     const { hours, description } = req.body;
     try {
-        const workLog = await WorkLog.findById(req.params.entryId).populate('user');
+        const workLog = await WorkLog.findOne({ _id: req.params.entryId, companyId: req.companyId }).populate('user');
 
         if (!workLog) {
             return res.status(404).json({ message: 'Entry (WorkLog) not found' });
@@ -580,7 +595,7 @@ const updateEntry = async (req, res) => {
         }
 
         const month = format(workLog.date, 'yyyy-MM');
-        const timesheet = await Timesheet.findOne({ user: owner._id, month });
+        const timesheet = await Timesheet.findOne({ user: owner._id, month, companyId: req.companyId });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
             if (!isManager && !isAdmin) {

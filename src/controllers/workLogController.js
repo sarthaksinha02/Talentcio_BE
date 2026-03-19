@@ -11,7 +11,7 @@ const logWork = async (req, res) => {
     const { taskId } = req.params;
 
     try {
-        const task = await Task.findById(taskId);
+        const task = await Task.findOne({ _id: taskId, companyId: req.companyId });
         if (!task) {
             return res.status(404).json({ message: 'Task not found' });
         }
@@ -25,6 +25,7 @@ const logWork = async (req, res) => {
         const existingLog = await WorkLog.findOne({
             task: taskId,
             user: req.user._id,
+            companyId: req.companyId,
             date: { $gte: startOfDay, $lte: endOfDay }
         });
 
@@ -35,6 +36,7 @@ const logWork = async (req, res) => {
         const workLog = await WorkLog.create({
             task: taskId,
             user: req.user._id,
+            companyId: req.companyId,
             date: new Date(date),
             hours,
             description,
@@ -43,12 +45,13 @@ const logWork = async (req, res) => {
 
         // Ensure a Timesheet exists for this month, but don't duplicate data
         const month = new Date(date).toISOString().slice(0, 7); // YYYY-MM
-        let timesheet = await Timesheet.findOne({ user: req.user._id, month });
+        let timesheet = await Timesheet.findOne({ user: req.user._id, month, companyId: req.companyId });
 
         if (!timesheet) {
             await Timesheet.create({
                 user: req.user._id,
                 month,
+                companyId: req.companyId,
                 status: 'DRAFT'
             });
         }
@@ -65,12 +68,12 @@ const logWork = async (req, res) => {
 const updateWorkLog = async (req, res) => {
     const { hours, description } = req.body;
     try {
-        const workLog = await WorkLog.findOne({ _id: req.params.id, user: req.user._id });
+        const workLog = await WorkLog.findOne({ _id: req.params.id, user: req.user._id, companyId: req.companyId });
         if (!workLog) return res.status(404).json({ message: 'Work log not found' });
 
         // Check if Timesheet is locked (Submitted/Approved)
         const month = format(workLog.date, 'yyyy-MM');
-        const timesheet = await Timesheet.findOne({ user: req.user._id, month });
+        const timesheet = await Timesheet.findOne({ user: req.user._id, month, companyId: req.companyId });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
             return res.status(400).json({ message: 'Cannot edit logs for a submitted timesheet' });
@@ -92,12 +95,12 @@ const updateWorkLog = async (req, res) => {
 // @route   DELETE /api/projects/worklogs/:id
 const deleteWorkLog = async (req, res) => {
     try {
-        const workLog = await WorkLog.findOne({ _id: req.params.id, user: req.user._id });
+        const workLog = await WorkLog.findOne({ _id: req.params.id, user: req.user._id, companyId: req.companyId });
         if (!workLog) return res.status(404).json({ message: 'Work log not found' });
 
         // Check if Timesheet is locked (Submitted/Approved)
         const month = format(workLog.date, 'yyyy-MM');
-        const timesheet = await Timesheet.findOne({ user: req.user._id, month });
+        const timesheet = await Timesheet.findOne({ user: req.user._id, month, companyId: req.companyId });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
             return res.status(400).json({ message: 'Cannot delete logs for a submitted timesheet' });
@@ -118,7 +121,7 @@ const getWorkLogs = async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 0; // 0 means no limit in Mongoose
 
-        const logs = await WorkLog.find({ user: req.user._id })
+        const logs = await WorkLog.find({ user: req.user._id, companyId: req.companyId })
             .populate({
                 path: 'task',
                 populate: {
