@@ -25,11 +25,11 @@ exports.createHiringRequest = async (req, res) => {
 
         let workflow;
         if (req.body.workflowId) {
-            workflow = await ApprovalWorkflow.findById(req.body.workflowId).populate('levels.role', 'name');
+            workflow = await ApprovalWorkflow.findOne({ _id: req.body.workflowId, companyId: req.companyId }).populate('levels.role', 'name');
         }
 
         if (!workflow) {
-            workflow = await ApprovalWorkflow.findOne({ isActive: true })
+            workflow = await ApprovalWorkflow.findOne({ isActive: true, companyId: req.companyId })
                 .populate('levels.role', 'name');
         }
 
@@ -59,6 +59,7 @@ exports.createHiringRequest = async (req, res) => {
             currentApprovalLevel: approvals.length > 0 ? 1 : 0,
             status: submitNow ? 'Submitted' : 'Draft',
             createdBy: req.user._id,
+            companyId: req.companyId,
             previousRequestId: previousRequestId || undefined
         });
 
@@ -112,7 +113,7 @@ exports.createHiringRequest = async (req, res) => {
 exports.getHiringRequests = async (req, res) => {
     try {
         const { status, page = 1, limit = 10 } = req.query;
-        let query = {};
+        let query = { companyId: req.companyId };
 
         if (status) query.status = status;
 
@@ -171,7 +172,7 @@ exports.getHiringRequestById = async (req, res) => {
         if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
             return res.status(400).json({ message: 'Invalid Hiring Request ID format' });
         }
-        const request = await HiringRequest.findById(req.params.id)
+        const request = await HiringRequest.findOne({ _id: req.params.id, companyId: req.companyId })
             .populate('ownership.hiringManager', 'firstName lastName email')
             .populate('ownership.recruiter', 'firstName lastName email')
             .populate('roleDetails.reportingManager', 'firstName lastName')
@@ -230,7 +231,7 @@ exports.updateHiringRequest = async (req, res) => {
         const { id } = req.params;
         const updates = req.body;
 
-        const request = await HiringRequest.findById(id);
+        const request = await HiringRequest.findOne({ _id: id, companyId: req.companyId });
         if (!request) return res.status(404).json({ message: 'Not found' });
 
         if (request.status === 'Closed') {
@@ -258,7 +259,7 @@ exports.updateHiringRequest = async (req, res) => {
         // If workflow is specified (either new or existing), rebuild approval chain
         const workflowId = req.body.workflowId || request.workflowId;
         if (workflowId) {
-            const workflow = await ApprovalWorkflow.findById(workflowId).populate('levels.role', 'name');
+            const workflow = await ApprovalWorkflow.findOne({ _id: workflowId, companyId: req.companyId }).populate('levels.role', 'name');
 
             if (workflow) {
                 request.workflowId = workflow._id;
@@ -331,7 +332,7 @@ exports.approveHiringRequest = async (req, res) => {
         const { level, comments } = req.body; // 'L1' or 'Final' for old flow
 
         // Fetch request with populated approvers for authorization check
-        const request = await HiringRequest.findById(id)
+        const request = await HiringRequest.findOne({ _id: id, companyId: req.companyId })
             .populate('approvalChain.approvers', '_id firstName lastName email');
 
         if (!request) return res.status(404).json({ message: 'Not found' });
@@ -473,7 +474,7 @@ exports.rejectHiringRequest = async (req, res) => {
         const { comments, level } = req.body;
 
         // Fetch request with populated approvers for authorization check
-        const request = await HiringRequest.findById(id)
+        const request = await HiringRequest.findOne({ _id: id, companyId: req.companyId })
             .populate('approvalChain.approvers', '_id firstName lastName email');
 
         if (!request) return res.status(404).json({ message: 'Not found' });
@@ -582,7 +583,7 @@ exports.closeHiringRequest = async (req, res) => {
 exports.getPreviousCandidates = async (req, res) => {
     try {
         const { id } = req.params;
-        const currentReq = await HiringRequest.findById(id).select('previousRequestId');
+        const currentReq = await HiringRequest.findOne({ _id: id, companyId: req.companyId }).select('previousRequestId');
         if (!currentReq || !currentReq.previousRequestId) {
             return res.status(200).json([]);
         }
@@ -592,7 +593,7 @@ exports.getPreviousCandidates = async (req, res) => {
         const legacyRequisitions = []; // ordered: pId is most recent previous
 
         while (pId) {
-            const r = await HiringRequest.findById(pId)
+            const r = await HiringRequest.findOne({ _id: pId, companyId: req.companyId })
                 .select('requestId status createdAt closedAt previousRequestId roleDetails')
                 .lean();
             if (!r) break;
@@ -655,12 +656,12 @@ exports.transferCandidate = async (req, res) => {
         if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
         // Find the most recent requisition in the chain
-        let currentReq = await HiringRequest.findById(candidate.hiringRequestId).select('reopenedToId');
+        let currentReq = await HiringRequest.findOne({ _id: candidate.hiringRequestId, companyId: req.companyId }).select('reopenedToId');
         let newestReqId = currentReq ? currentReq._id : null;
 
         while (currentReq && currentReq.reopenedToId) {
             newestReqId = currentReq.reopenedToId;
-            currentReq = await HiringRequest.findById(currentReq.reopenedToId).select('reopenedToId hover');
+            currentReq = await HiringRequest.findOne({ _id: currentReq.reopenedToId, companyId: req.companyId }).select('reopenedToId hover');
         }
 
         if (!newestReqId || newestReqId.toString() === candidate.hiringRequestId.toString()) {
@@ -724,9 +725,9 @@ exports.getClientAnalytics = async (req, res) => {
         clientName = decodeURIComponent(clientName);
 
         // Fetch all hiring requests for this client mainly to build the dropdown list
-        const allClientReqs = await HiringRequest.find({ client: clientName }).select('_id roleDetails.title status').lean();
+        const allClientReqs = await HiringRequest.find({ client: clientName, companyId: req.companyId }).select('_id roleDetails.title status').lean();
 
-        let hrQuery = { client: clientName };
+        let hrQuery = { client: clientName, companyId: req.companyId };
         if (hiringRequestId) {
             hrQuery._id = hiringRequestId;
         }
@@ -892,7 +893,7 @@ exports.getGlobalAnalytics = async (req, res) => {
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
         const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
-        let hrQuery = {};
+        let hrQuery = { companyId: req.companyId };
         if (!isAdmin && !hasTaView) {
             const candidatesWithUserAsInterviewer = await Candidate.find({
                 'interviewRounds.assignedTo': req.user._id

@@ -62,6 +62,12 @@ const helpdeskQuerySchema = new mongoose.Schema({
     },
     closedAt: {
         type: Date
+    },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        required: true,
+        index: true
     }
 }, {
     timestamps: true

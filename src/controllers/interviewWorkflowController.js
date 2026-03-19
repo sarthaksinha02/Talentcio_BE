@@ -91,7 +91,7 @@ exports.updateInterviewWorkflow = async (req, res) => {
         await workflow.save();
 
         // Populate to match GET outputs
-        const updatedWorkflow = await InterviewWorkflow.findById(workflow._id)
+        const updatedWorkflow = await InterviewWorkflow.findOne({ _id: workflow._id, companyId: req.companyId })
             .populate('rounds.role', 'name description')
             .populate('createdBy', 'firstName lastName email');
 

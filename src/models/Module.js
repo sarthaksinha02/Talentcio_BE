@@ -18,7 +18,13 @@ const moduleSchema = new mongoose.Schema({
         default: 'PLANNED'
     },
     startDate: Date,
-    dueDate: Date
+    dueDate: Date,
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        required: true,
+        index: true
+    }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Module', moduleSchema);
