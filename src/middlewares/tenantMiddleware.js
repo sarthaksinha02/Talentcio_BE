@@ -19,12 +19,17 @@ const tenantMiddleware = async (req, res, next) => {
                     subdomain = parts[0];
                 }
             } else if (parts.length > 2) {
-                // Ignore subdomains of cloud providers
-                const cloudProviders = ['render.com', 'onrender.com', 'vercel.app', 'herokuapp.com'];
-                const isCloudDomain = cloudProviders.some(p => domain.endsWith(p));
-                
-                if (!isCloudDomain) {
-                    subdomain = parts[0];
+                // If it's a Vercel domain, use the prefix as the subdomain
+                // e.g. anything.vercel.app -> subdomain = 'anything'
+                if (domain.endsWith('vercel.app')) {
+                    subdomain = domain.replace('.vercel.app', '');
+                } else {
+                    // Ignore other cloud providers
+                    const cloudProviders = ['render.com', 'onrender.com', 'herokuapp.com'];
+                    const isCloudDomain = cloudProviders.some(p => domain.endsWith(p));
+                    if (!isCloudDomain) {
+                        subdomain = parts[0];
+                    }
                 }
             }
         }
