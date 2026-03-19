@@ -39,19 +39,19 @@ const protect = async (req, res, next) => {
             }
 
             // --- Multi-tenant isolation check ---
-            // If a tenant workspace is identified (subdomain), the user MUST belong to it.
-            if (req.companyId && req.user.companyId && req.user.companyId.toString() !== req.companyId.toString()) {
-                console.warn(`[SECURITY ALERT] User ${req.user.email} attempted cross-tenant access from workspace ${req.company?.name || req.companyId} while belonging to ${req.user.companyId}`);
-                return res.status(403).json({ 
-                    message: `Your account does not belong to the '${req.company?.name || 'requested'}' workspace.`,
-                    code: 'TENANT_MISMATCH'
-                });
-            }
-
-            // Sync req.company if it was resolved by tenantMiddleware
-            // (already handled in tenantMiddleware, but good to keep reference here)
-            if (req.companyId && !req.user.companyId) {
-                 // Guest or newly registered user? Still scoped to this companyId
+            // 1. If a tenant workspace is identified by URL (req.companyId), the user MUST belong to it.
+            if (req.companyId) {
+                if (req.user.companyId && req.user.companyId.toString() !== req.companyId.toString()) {
+                    console.warn(`[SECURITY ALERT] User ${req.user.email} attempted cross-tenant access from workspace ${req.company?.name || req.companyId} while belonging to ${req.user.companyId}`);
+                    return res.status(403).json({ 
+                        message: `Your account does not belong to the '${req.company?.name || 'requested'}' workspace.`,
+                        code: 'TENANT_MISMATCH'
+                    });
+                }
+            } 
+            // 2. If NO tenant workspace is identified (localhost, main domain), fallback to user's company
+            else if (req.user.companyId) {
+                req.companyId = req.user.companyId;
             }
 
             if (!req.user) {
