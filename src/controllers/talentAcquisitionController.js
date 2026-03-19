@@ -16,7 +16,7 @@ const generateRequestId = async () => {
 // --- createHiringRequest ---
 exports.createHiringRequest = async (req, res) => {
     try {
-        const { client, roleDetails, purpose, requirements, hiringDetails, ownership, replacementDetails, interviewWorkflowId, previousRequestId } = req.body;
+        const { client, roleDetails, purpose, requirements, hiringDetails, ownership, replacementDetails, interviewWorkflowId, previousRequestId, jobDescription, jobDescriptionFile } = req.body;
         const submitNow = req.query.submit === 'true';
 
         // validations...
@@ -60,7 +60,9 @@ exports.createHiringRequest = async (req, res) => {
             status: submitNow ? 'Submitted' : 'Draft',
             createdBy: req.user._id,
             companyId: req.companyId,
-            previousRequestId: previousRequestId || undefined
+            previousRequestId: previousRequestId || undefined,
+            jobDescription,
+            jobDescriptionFile
         });
 
         if (submitNow) {
@@ -241,7 +243,8 @@ exports.updateHiringRequest = async (req, res) => {
         // Apply updates to request securely (prevent mass assignment)
         const allowedUpdates = [
             'client', 'roleDetails', 'purpose', 'requirements',
-            'hiringDetails', 'replacementDetails', 'ownership', 'interviewWorkflowId'
+            'hiringDetails', 'replacementDetails', 'ownership', 'interviewWorkflowId',
+            'jobDescription', 'jobDescriptionFile'
         ];
 
         allowedUpdates.forEach(field => {
@@ -1216,5 +1219,26 @@ exports.getGlobalAnalytics = async (req, res) => {
     } catch (error) {
         console.error('getGlobalAnalytics error:', error);
         res.status(500).json({ success: false, message: 'Internal Server Error', error: error.message });
+    }
+};
+
+// --- uploadJDFile ---
+exports.uploadJDFile = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No file uploaded' });
+        }
+
+        // The file is already uploaded to Cloudinary by the multer middleware
+        // defined in the routes (config/cloudinary)
+        const fileUrl = req.file.path; // Cloudinary URL
+
+        res.status(200).json({
+            message: 'JD file uploaded successfully',
+            url: fileUrl
+        });
+    } catch (error) {
+        console.error('Error uploading JD file:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
