@@ -20,14 +20,15 @@ const tenantMiddleware = async (req, res, next) => {
                     subdomain = parts[0];
                 }
             } 
-            // --- VERCEL / CLOUD HANDLING ---
-            else if (domain.endsWith('vercel.app')) {
-                // Extract the project prefix (e.g., telentcio-demo)
-                subdomain = domain.replace('.vercel.app', '');
+            // --- VERCEL / RENDER / CLOUD HANDLING ---
+            else if (domain.endsWith('vercel.app') || domain.endsWith('onrender.com')) {
+                // Extract the project prefix (e.g., telentcio-demo or talentcio)
+                const suffix = domain.endsWith('vercel.app') ? '.vercel.app' : '.onrender.com';
+                subdomain = domain.replace(suffix, '');
             } 
             // --- CUSTOM DOMAIN HANDLING ---
             else if (parts.length > 2) {
-                const cloudProviders = ['render.com', 'onrender.com', 'herokuapp.com'];
+                const cloudProviders = ['render.com', 'herokuapp.com'];
                 const isCloudDomain = cloudProviders.some(p => domain.endsWith(p));
                 if (!isCloudDomain) {
                     subdomain = parts[0];

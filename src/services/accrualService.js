@@ -6,15 +6,17 @@ const LeaveBalance = require('../models/LeaveBalance');
  * Run Monthly Accrual for a specific month/year.
  * Usually runs on 1st of Month.
  */
-const runMonthlyAccrual = async () => {
+const runMonthlyAccrual = async (companyId) => {
+    if (!companyId) throw new Error('companyId is required for Monthly Accrual');
+
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth() + 1; // 1-12
 
-    console.log(`Running Monthly Accrual for ${currentMonth}/${currentYear}`);
+    console.log(`Running Monthly Accrual for Company ${companyId} - Period ${currentMonth}/${currentYear}`);
 
-    const users = await User.find({ isActive: true });
-    const configs = await LeaveConfig.find({ isActive: true, accrualType: 'Monthly' });
+    const users = await User.find({ isActive: true, companyId });
+    const configs = await LeaveConfig.find({ isActive: true, accrualType: 'Monthly', companyId });
 
     let updates = 0;
 
@@ -28,11 +30,11 @@ const runMonthlyAccrual = async () => {
                 continue;
             }
 
-            let balance = await LeaveBalance.findOne({ user: user._id, leaveType: config.leaveType, year: currentYear });
+            let balance = await LeaveBalance.findOne({ user: user._id, leaveType: config.leaveType, year: currentYear, companyId });
 
             if (!balance) {
                 // If balance doesn't exist for this year, create it
-                balance = await LeaveBalance.create({ user: user._id, leaveType: config.leaveType, year: currentYear });
+                balance = await LeaveBalance.create({ user: user._id, leaveType: config.leaveType, year: currentYear, companyId });
             }
 
             // Add Accrual, capped at maxLimitPerYear if set
@@ -52,28 +54,29 @@ const runMonthlyAccrual = async () => {
         }
     }
 
-    return { message: `Monthly Accrual Completed. Updated/Created ${updates} records.` };
+    return { message: `Monthly Accrual Completed for Company ${companyId}. Updated/Created ${updates} records.` };
 };
 
 /**
  * Run Yearly Processing (Carry Forward + New Year Initialization)
  * Runs on Jan 1st of newYear.
  */
-const runYearlyProcessing = async (newYear) => {
+const runYearlyProcessing = async (companyId, newYear) => {
+    if (!companyId) throw new Error('companyId is required for Yearly Processing');
     if (!newYear) newYear = new Date().getFullYear();
     const prevYear = newYear - 1;
 
-    console.log(`Running Yearly Processing for ${newYear} (From ${prevYear})`);
+    console.log(`Running Yearly Processing for Company ${companyId} - Year ${newYear} (From ${prevYear})`);
 
-    const users = await User.find({ isActive: true });
-    const configs = await LeaveConfig.find({ isActive: true });
+    const users = await User.find({ isActive: true, companyId });
+    const configs = await LeaveConfig.find({ isActive: true, companyId });
 
     let processed = 0;
 
     for (const user of users) {
         for (const config of configs) {
             // Get Previous Year Balance
-            const prevBalance = await LeaveBalance.findOne({ user: user._id, leaveType: config.leaveType, year: prevYear });
+            const prevBalance = await LeaveBalance.findOne({ user: user._id, leaveType: config.leaveType, year: prevYear, companyId });
 
             // Calculate Closing of Prev Year
             let prevClosing = 0;
@@ -91,7 +94,7 @@ const runYearlyProcessing = async (newYear) => {
             }
 
             // Check if already exists to avoid duplicate logic
-            let newBalance = await LeaveBalance.findOne({ user: user._id, leaveType: config.leaveType, year: newYear });
+            let newBalance = await LeaveBalance.findOne({ user: user._id, leaveType: config.leaveType, year: newYear, companyId });
 
             if (!newBalance) {
                 newBalance = new LeaveBalance({
@@ -101,7 +104,8 @@ const runYearlyProcessing = async (newYear) => {
                     openingBalance: newOpening,
                     accrued: 0,
                     utilized: 0,
-                    encashed: 0
+                    encashed: 0,
+                    companyId
                 });
             } else {
                 // Update existing opening? Safe to update if re-running
@@ -118,7 +122,7 @@ const runYearlyProcessing = async (newYear) => {
         }
     }
 
-    return { message: `Yearly Processing Completed. Processed ${processed} records.` };
+    return { message: `Yearly Processing Completed for Company ${companyId}. Processed ${processed} records.` };
 };
 
 module.exports = { runMonthlyAccrual, runYearlyProcessing };

@@ -131,7 +131,7 @@ const { runMonthlyAccrual, runYearlyProcessing } = require('../services/accrualS
 // @access  Admin
 const triggerMonthlyAccrual = async (req, res) => {
     try {
-        const result = await runMonthlyAccrual();
+        const result = await runMonthlyAccrual(req.companyId);
         res.json(result);
     } catch (error) {
         console.error(error);
@@ -145,7 +145,7 @@ const triggerMonthlyAccrual = async (req, res) => {
 const triggerYearlyAccrual = async (req, res) => {
     try {
         const { year } = req.body;
-        const result = await runYearlyProcessing(year);
+        const result = await runYearlyProcessing(req.companyId, year);
         res.json(result);
     } catch (error) {
         console.error(error);

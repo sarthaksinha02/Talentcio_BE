@@ -7,7 +7,7 @@ const NotificationService = require('../services/notificationService');
 
 
 // Helper to initialize balance dynamically based on policy
-const initializeBalance = async (userId, policy, year) => {
+const initializeBalance = async (userId, policy, year, companyId) => {
     let initialAccrued = 0;
 
     if (policy.accrualType === 'Yearly') {
@@ -31,7 +31,8 @@ const initializeBalance = async (userId, policy, year) => {
         accrued: initialAccrued,
         utilized: 0,
         encashed: 0,
-        closingBalance: initialAccrued
+        closingBalance: initialAccrued,
+        companyId: companyId || policy.companyId
     });
 };
 
@@ -44,7 +45,7 @@ const applyLeave = async (req, res) => {
 
     try {
         // 1. Fetch Policy
-        const policy = await LeaveConfig.findOne({ leaveType, isActive: true });
+        const policy = await LeaveConfig.findOne({ leaveType, isActive: true, companyId: req.companyId });
         if (!policy) {
             return res.status(400).json({ message: 'Invalid or inactive leave type' });
         }
@@ -67,6 +68,7 @@ const applyLeave = async (req, res) => {
         const reqEnd = new Date(endDate);
         const overlapping = await LeaveRequest.findOne({
             user: userId,
+            companyId: req.companyId,
             status: { $in: ['Pending', 'Approved'] },
             // Two ranges overlap when: existingStart <= reqEnd AND existingEnd >= reqStart
             startDate: { $lte: reqEnd },
@@ -98,11 +100,11 @@ const applyLeave = async (req, res) => {
 
         // 5. Check Balance
         const currentYear = new Date().getFullYear();
-        let balance = await LeaveBalance.findOne({ user: userId, leaveType, year: currentYear });
+        let balance = await LeaveBalance.findOne({ user: userId, leaveType, year: currentYear, companyId: req.companyId });
 
         // Auto-create balance if missing
         if (!balance) {
-            balance = await initializeBalance(userId, policy, currentYear);
+            balance = await initializeBalance(userId, policy, currentYear, req.companyId);
         }
 
         // Calculate Available
@@ -127,6 +129,7 @@ const applyLeave = async (req, res) => {
         // 7. Create Request
         const leaveRequest = await LeaveRequest.create({
             user: userId,
+            companyId: req.companyId,
             leaveType,
 
             startDate,
@@ -172,13 +175,13 @@ const getMyLeaves = async (req, res) => {
         const skip = (page - 1) * limit;
 
         const [leaves, total] = await Promise.all([
-            LeaveRequest.find({ user: req.user._id })
+            LeaveRequest.find({ user: req.user._id, companyId: req.companyId })
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .select('leaveType startDate endDate isHalfDay reason status createdAt daysCount')
                 .lean(),
-            LeaveRequest.countDocuments({ user: req.user._id })
+            LeaveRequest.countDocuments({ user: req.user._id, companyId: req.companyId })
         ]);
 
         res.json({
@@ -204,7 +207,7 @@ const getMyBalances = async (req, res) => {
         const year = new Date().getFullYear();
 
         // Start by getting all active policies
-        const allPolicies = await LeaveConfig.find({ isActive: true }).lean();
+        const allPolicies = await LeaveConfig.find({ isActive: true, companyId: req.companyId }).lean();
 
         // Filter policies based on user employment type (Strict Check)
         const userEmploymentType = req.user.employmentType || 'Full Time';
@@ -217,11 +220,11 @@ const getMyBalances = async (req, res) => {
         const balances = [];
 
         for (const policy of policies) {
-            let balance = await LeaveBalance.findOne({ user: req.user._id, leaveType: policy.leaveType, year }).lean();
+            let balance = await LeaveBalance.findOne({ user: req.user._id, leaveType: policy.leaveType, year, companyId: req.companyId }).lean();
 
             // If no balance record, initialize it based on the policy rules
             if (!balance) {
-                const newBalance = await initializeBalance(req.user._id, policy, year);
+                const newBalance = await initializeBalance(req.user._id, policy, year, req.companyId);
                 balance = newBalance.toObject();
             } else {
                 // Calculate virtual closing
@@ -253,11 +256,11 @@ const getManagerApprovals = async (req, res) => {
             (typeof r === 'string' ? r : r.name) === 'Admin'
         );
 
-        let query = { status: 'Pending' };
+        let query = { status: 'Pending', companyId: req.companyId };
 
         if (!isAdmin) {
             // Managers only see their direct reports' requests
-            const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
+            const subordinates = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
             const subordinateIds = subordinates.map(u => u._id);
 
             if (subordinateIds.length === 0) {
@@ -289,13 +292,13 @@ const updateLeaveStatus = async (req, res) => {
     const managerId = req.user._id;
 
     try {
-        const request = await LeaveRequest.findById(requestId);
+        const request = await LeaveRequest.findOne({ _id: requestId, companyId: req.companyId });
         if (!request) {
             return res.status(404).json({ message: 'Request not found' });
         }
 
         // Verify Authority: must be a direct reporting manager OR have an admin role
-        const employee = await User.findById(request.user);
+        const employee = await User.findOne({ _id: request.user, companyId: req.companyId });
         if (!employee) {
             return res.status(404).json({ message: 'Employee not found' });
         }
@@ -316,7 +319,7 @@ const updateLeaveStatus = async (req, res) => {
         if (status === 'Approved') {
             // Update Balance
             const currentYear = new Date().getFullYear();
-            let balance = await LeaveBalance.findOne({ user: request.user, leaveType: request.leaveType, year: currentYear });
+            let balance = await LeaveBalance.findOne({ user: request.user, leaveType: request.leaveType, year: currentYear, companyId: req.companyId });
 
             // If balance check wasn't strict during apply (wait state), re-check here? 
             // We checked during apply. But let's assume valid.
@@ -325,7 +328,7 @@ const updateLeaveStatus = async (req, res) => {
 
             if (!balance) {
                 // Should exist if applied, but safe
-                balance = await LeaveBalance.create({ user: request.user, leaveType: request.leaveType, year: currentYear });
+                balance = await LeaveBalance.create({ user: request.user, leaveType: request.leaveType, year: currentYear, companyId: req.companyId });
             }
 
             balance.utilized += request.daysCount;
@@ -370,15 +373,10 @@ const cancelLeave = async (req, res) => {
     const userId = req.user._id;
 
     try {
-        const request = await LeaveRequest.findById(requestId);
+        const request = await LeaveRequest.findOne({ _id: requestId, user: userId, companyId: req.companyId });
 
         if (!request) {
             return res.status(404).json({ message: 'Request not found' });
-        }
-
-        // Only the owner can cancel their own request
-        if (request.user.toString() !== userId.toString()) {
-            return res.status(403).json({ message: 'Not authorized to cancel this request' });
         }
 
         if (request.status !== 'Pending') {
