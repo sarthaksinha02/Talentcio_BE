@@ -44,6 +44,10 @@ const applyLeave = async (req, res) => {
     const userId = req.user._id;
 
     try {
+        console.log(`[LeaveApply] company: ${req.companyId}, user: ${userId}`);
+        
+        if (!req.companyId) return res.status(400).json({ message: 'Tenant context missing' });
+
         // 1. Fetch Policy
         const policy = await LeaveConfig.findOne({ leaveType, isActive: true, companyId: req.companyId });
         if (!policy) {
@@ -160,8 +164,8 @@ const applyLeave = async (req, res) => {
         res.status(201).json(leaveRequest);
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveApply Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -194,8 +198,8 @@ const getMyLeaves = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveRequests Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -205,6 +209,9 @@ const getMyLeaves = async (req, res) => {
 const getMyBalances = async (req, res) => {
     try {
         const year = new Date().getFullYear();
+        
+        console.log(`[LeaveBalance] GET for company: ${req.companyId}, user: ${req.user._id}`);
+        if (!req.companyId) return res.status(400).json({ message: 'Tenant context missing' });
 
         // Start by getting all active policies
         const allPolicies = await LeaveConfig.find({ isActive: true, companyId: req.companyId }).lean();
@@ -242,8 +249,8 @@ const getMyBalances = async (req, res) => {
 
         res.json(balances);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveBalance Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -278,8 +285,8 @@ const getManagerApprovals = async (req, res) => {
 
         res.json(requests);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveApprovals Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -360,8 +367,8 @@ const updateLeaveStatus = async (req, res) => {
         res.json(request);
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveUpdateStatus Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -394,8 +401,8 @@ const cancelLeave = async (req, res) => {
         res.json({ message: 'Leave request cancelled successfully', request });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveCancel Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 

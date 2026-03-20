@@ -6,11 +6,12 @@ const LeaveBalance = require('../models/LeaveBalance'); // Added for balance rec
 // @access  Public (Authenticated)
 const getLeavePolicies = async (req, res) => {
     try {
+        console.log(`[LeaveConfig] GET policies for company: ${req.companyId}`);
         const policies = await LeaveConfig.find({ isActive: true, companyId: req.companyId });
         res.json(policies);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveConfig GET Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -26,6 +27,12 @@ const updateLeavePolicy = async (req, res) => {
     } = req.body;
 
     try {
+        console.log(`[LeaveConfig] POST update for company: ${req.companyId}, policy: ${leaveType}`);
+        
+        if (!req.companyId) {
+            return res.status(400).json({ message: 'Tenant context (companyId) is missing' });
+        }
+
         let policy = await LeaveConfig.findOne({ leaveType, companyId: req.companyId });
 
         if (policy) {
@@ -76,7 +83,6 @@ const updateLeavePolicy = async (req, res) => {
                 );
             } catch (calcError) {
                 console.error('[LeaveConfig Update] Failed to propagate balance changes:', calcError);
-                // System logs error, but policy itself still saved successfully.
             }
 
             return res.json(policy);
@@ -92,8 +98,8 @@ const updateLeavePolicy = async (req, res) => {
             return res.status(201).json(policy);
         }
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveConfig POST Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -102,6 +108,7 @@ const updateLeavePolicy = async (req, res) => {
 // @access  Private (Admin)
 const seedDefaultPolicies = async (req, res) => {
     try {
+        console.log(`[LeaveConfig] SEED for company: ${req.companyId}`);
         const defaults = [
             { leaveType: 'CL', name: 'Casual Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1, maxLimitPerYear: 12, carryForward: false },
             { leaveType: 'SL', name: 'Sick Leave', isPaid: true, accrualType: 'Yearly', accrualAmount: 8, maxLimitPerYear: 8, carryForward: false },
@@ -119,8 +126,8 @@ const seedDefaultPolicies = async (req, res) => {
 
         res.json({ message: 'Default policies seeded' });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveConfig SEED Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
