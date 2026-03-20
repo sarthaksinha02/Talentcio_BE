@@ -173,14 +173,14 @@ const getProjectHierarchy = async (req, res) => {
         const isMember = project.members.some(m => m._id.toString() === req.user._id.toString());
 
         // Determine Access
-        let hasAccess = canViewAll || isManager || isMember;
+        let hasAccess = canViewAll || isManager || isMember || canLogTime;
 
         if (!hasAccess) {
             const projectModules = await Module.find({ project: id, companyId: req.companyId }).select('_id');
             const projectModuleIds = projectModules.map(m => m._id);
 
             // 1. Check Assigned Task
-            if (canViewAssigned || canViewTeam) {
+            if (canViewAssigned || canViewTeam || canLogTime) {
                 const assignedTask = await Task.findOne({ module: { $in: projectModuleIds }, assignees: req.user._id, companyId: req.companyId });
                 if (assignedTask) hasAccess = true;
             }
@@ -358,14 +358,14 @@ const getModules = async (req, res) => {
         const isManager = project.manager?.toString() === req.user._id.toString();
         const isMember = project.members?.some(m => m.toString() === req.user._id.toString());
 
-        let hasAccess = canViewAll || isManager || isMember;
+        let hasAccess = canViewAll || isManager || isMember || canLogTime;
 
         if (!hasAccess) {
             const modules = await Module.find({ project: projectId, companyId: req.companyId }).select('_id');
             const moduleIds = modules.map(m => m._id);
 
             // 1. Check Assigned Task
-            if (canViewAssigned || canViewTeam) {
+            if (canViewAssigned || canViewTeam || canLogTime) {
                 const assignedTask = await Task.findOne({ module: { $in: moduleIds }, assignees: req.user._id, companyId: req.companyId });
                 if (assignedTask) hasAccess = true;
             }
