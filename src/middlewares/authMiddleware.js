@@ -23,7 +23,8 @@ const protect = async (req, res, next) => {
                     populate: {
                         path: 'permissions'
                     }
-                }).populate('reportingManagers', 'firstName lastName');
+                }).populate('reportingManagers', 'firstName lastName')
+                .lean();
             
             if (req.user && req.user.roles) {
                 req.user.permissions = [...new Set(

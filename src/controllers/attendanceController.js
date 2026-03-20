@@ -192,7 +192,7 @@ exports.getMyAttendance = async (req, res) => {
             end.setMonth(end.getMonth() + 1);
             query.date = { $gte: start, $lt: end };
         }
-        const history = await Attendance.find(query).sort({ date: -1 });
+        const history = await Attendance.find(query).sort({ date: -1 }).lean();
         res.json(history);
     } catch (error) {
         console.error(error);
@@ -220,7 +220,7 @@ exports.getAttendanceByMonth = async (req, res) => {
             end.setMonth(end.getMonth() + 1);
             query.date = { $gte: start, $lt: end };
         }
-        const history = await Attendance.find(query).populate('user', 'firstName lastName').sort({ date: -1 });
+        const history = await Attendance.find(query).populate('user', 'firstName lastName').sort({ date: -1 }).lean();
         res.json(history);
     } catch (error) {
         console.error(error);
@@ -322,7 +322,8 @@ exports.getPendingRequests = async (req, res) => {
 
         const requests = await Attendance.find(query)
             .populate('user', 'firstName lastName employeeCode')
-            .sort({ date: -1 });
+            .sort({ date: -1 })
+            .lean();
             
         res.json(requests);
     } catch (error) {
@@ -347,13 +348,9 @@ exports.getTeamAttendanceReport = async (req, res) => {
             userFilter.reportingManagers = req.user._id;
         }
 
-        const teamMembers = await User.find(userFilter).select('firstName lastName employeeCode department');
-        const memberIds = teamMembers.map(m => m._id);
-
-        let attendanceQuery = { user: { $in: memberIds }, companyId: req.companyId };
+        let attendanceQuery = { user: { $in: teamMembers.map(m => m._id) }, companyId: req.companyId };
 
         if (year && month) {
-            // Support separate year/month params
             const resolvedMonth = `${year}-${String(month).padStart(2, '0')}`;
             const start = new Date(resolvedMonth + '-01');
             const end = new Date(start);
@@ -367,7 +364,7 @@ exports.getTeamAttendanceReport = async (req, res) => {
             attendanceQuery.date = { $gte: today, $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) };
         }
 
-        const attendanceRecords = await Attendance.find(attendanceQuery);
+        const attendanceRecords = await Attendance.find(attendanceQuery).lean();
 
         res.json({ teamMembers, attendanceRecords });
     } catch (error) {
@@ -491,7 +488,8 @@ exports.getRegularizationRequests = async (req, res) => {
         const requests = await AttendanceRegularization.find(query)
             .populate('user', 'firstName lastName employeeCode')
             .populate('manager', 'firstName lastName')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
             
         res.json(requests);
     } catch (error) {

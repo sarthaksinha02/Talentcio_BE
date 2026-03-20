@@ -15,7 +15,8 @@ const getUsers = async (req, res) => {
                 populate: { path: 'permissions', select: 'key' }
             })
             .populate('reportingManagers', 'firstName lastName email')
-            .populate('employeeProfile', 'hris');
+            .populate('employeeProfile', 'hris')
+            .lean();
         res.json(users);
     } catch (error) {
         console.error(error);
@@ -170,7 +171,8 @@ const getMyTeam = async (req, res) => {
             .select('-password')
             .populate('roles', 'name')
             .populate('reportingManagers', 'firstName lastName email')
-            .populate('employeeProfile', 'hris');
+            .populate('employeeProfile', 'hris')
+            .lean();
         res.json(team);
     } catch (error) {
         console.error(error);
@@ -189,7 +191,8 @@ const getMyself = async (req, res) => {
                 select: 'name',
                 populate: { path: 'permissions', select: 'key' }   // Only fetch the key, nothing else
             })
-            .populate('reportingManagers', 'firstName lastName email');
+            .populate('reportingManagers', 'firstName lastName email')
+            .lean();
 
         if (!user) {
             return res.status(404).json({ message: 'User not found in this workspace context' });
@@ -246,11 +249,15 @@ const getMyself = async (req, res) => {
             }
         }
 
-        // Check if they are an interviewer via per-candidate round assignment (precise check)
         let isInterviewer = false;
         let interviewCount = 0;
+        
+        // Final concurrent batch for TA/Interviewer checks if not already determined
         if (taCount === 0 && !permissions.includes('ta.view') && !permissions.includes('*')) {
-            interviewCount = await Candidate.countDocuments({ 'interviewRounds.assignedTo': req.user._id, companyId: effectiveCompanyId });
+            interviewCount = await Candidate.countDocuments({ 
+                'interviewRounds.assignedTo': req.user._id, 
+                companyId: effectiveCompanyId 
+            });
             isInterviewer = interviewCount > 0;
         }
 

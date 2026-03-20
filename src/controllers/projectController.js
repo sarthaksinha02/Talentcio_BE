@@ -11,7 +11,8 @@ const User = require('../models/User');
 const getEmployees = async (req, res) => {
     try {
         const users = await User.find({ companyId: req.companyId })
-            .select('firstName lastName email');
+            .select('firstName lastName email')
+            .lean();
         res.json(users);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -22,7 +23,8 @@ const getEmployees = async (req, res) => {
 const getBusinessUnits = async (req, res) => {
     try {
         const units = await BusinessUnit.find({ companyId: req.companyId })
-            .populate('headOfUnit', 'firstName lastName');
+            .populate('headOfUnit', 'firstName lastName')
+            .lean();
         res.json(units);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -55,7 +57,8 @@ const updateBusinessUnit = async (req, res) => {
 const getClients = async (req, res) => {
     try {
         const clients = await Client.find({ companyId: req.companyId })
-            .populate('businessUnit', 'name');
+            .populate('businessUnit', 'name')
+            .lean();
         res.json(clients);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -138,7 +141,8 @@ const getProjects = async (req, res) => {
         const projects = await Project.find(query)
             .populate('client', 'name')
             .populate('manager', 'firstName lastName')
-            .populate('members', 'firstName lastName'); // Populate members to show them if needed
+            .populate('members', 'firstName lastName') // Populate members to show them if needed
+            .lean();
         res.json(projects);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -151,7 +155,8 @@ const getProjectHierarchy = async (req, res) => {
         const project = await Project.findOne({ _id: id, companyId: req.companyId })
             .populate('client', 'name')
             .populate('manager', 'firstName lastName')
-            .populate('members', '_id'); // Need IDs to check membership
+            .populate('members', '_id') // Need IDs to check membership
+            .lean();
 
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
@@ -176,12 +181,18 @@ const getProjectHierarchy = async (req, res) => {
         let hasAccess = canViewAll || isManager || isMember || canLogTime;
 
         if (!hasAccess) {
-            const projectModules = await Module.find({ project: id, companyId: req.companyId }).select('_id');
+            const projectModules = await Module.find({ project: id, companyId: req.companyId })
+                .select('_id')
+                .lean();
             const projectModuleIds = projectModules.map(m => m._id);
 
             // 1. Check Assigned Task
             if (canViewAssigned || canViewTeam || canLogTime) {
-                const assignedTask = await Task.findOne({ module: { $in: projectModuleIds }, assignees: req.user._id, companyId: req.companyId });
+                const assignedTask = await Task.findOne({ 
+                    module: { $in: projectModuleIds }, 
+                    assignees: req.user._id, 
+                    companyId: req.companyId 
+                }).lean();
                 if (assignedTask) hasAccess = true;
             }
 
@@ -212,20 +223,16 @@ const getProjectHierarchy = async (req, res) => {
 
 
 
-        const modules = await Module.find({ project: id, companyId: req.companyId }).sort({ startDate: 1 });
-
-        // Fetch all tasks for these modules
-        const moduleIds = modules.map(m => m._id);
-
-        // Filter: If not Admin/Manager/Member, restrict to assigned tasks
-        let taskQuery = { module: { $in: moduleIds } };
-        if (!canViewAll && !isManager && !isMember) {
-            taskQuery.assignees = req.user._id;
-        }
-
-        const tasks = await Task.find(taskQuery)
-            .populate('assignees', 'firstName lastName')
-            .sort({ startDate: 1 });
+        // Parallelize fetching of modules and tasks
+        const [modules, tasks] = await Promise.all([
+            Module.find({ project: id, companyId: req.companyId })
+                .sort({ startDate: 1 })
+                .lean(),
+            Task.find(taskQuery)
+                .populate('assignees', 'firstName lastName')
+                .sort({ startDate: 1 })
+                .lean()
+        ]);
 
         // Fetch Work Logs for these tasks
         // We need WorkLog model here
@@ -251,7 +258,8 @@ const getProjectHierarchy = async (req, res) => {
         if (canViewWorkLogs || isManager || isMember) {
             workLogs = await WorkLog.find({ task: { $in: taskIds }, companyId: req.companyId })
                 .populate('user', 'firstName lastName')
-                .sort({ date: -1 });
+                .sort({ date: -1 })
+                .lean();
         } else {
             // User can see the hierarchy (modules/tasks) but NOT the work logs.
             // We return empty logs.

@@ -20,7 +20,7 @@ const getCurrentTimesheet = async (req, res) => {
             user: req.user._id,
             month: currentMonth,
             companyId: req.companyId
-        });
+        }).lean();
 
         if (!timesheet) {
             // Create a draft if it doesn't exist
@@ -38,7 +38,8 @@ const getCurrentTimesheet = async (req, res) => {
         try {
             fullUser = await User.findById(req.user._id)
                 .select('firstName lastName email employeeCode')
-                .populate('reportingManagers', 'firstName lastName email');
+                .populate('reportingManagers', 'firstName lastName email')
+                .lean();
         } catch (err) {
             console.error('Error populating user details:', err);
             fullUser = {
@@ -79,17 +80,24 @@ const getCurrentTimesheet = async (req, res) => {
             end = endOfMonth(date);
         }
 
-        const workLogs = await WorkLog.find({
-            user: req.user._id,
-            companyId: req.companyId,
-            date: { $gte: start, $lte: end }
-        }).populate({
-            path: 'task',
-            populate: {
-                path: 'module',
-                populate: { path: 'project' }
-            }
-        }).sort({ date: 1 });
+        const [workLogs, attendance] = await Promise.all([
+            WorkLog.find({
+                user: req.user._id,
+                companyId: req.companyId,
+                date: { $gte: start, $lte: end }
+            }).populate({
+                path: 'task',
+                populate: {
+                    path: 'module',
+                    populate: { path: 'project' }
+                }
+            }).sort({ date: 1 }).lean(),
+            Attendance.find({
+                user: req.user._id,
+                companyId: req.companyId,
+                date: { $gte: start, $lte: end }
+            }).select('date clockInIST clockOutIST duration clockIn clockOut').lean()
+        ]);
 
         const entries = workLogs.map(log => ({
             _id: log._id,
@@ -104,15 +112,8 @@ const getCurrentTimesheet = async (req, res) => {
             rejectionReason: log.rejectionReason
         }));
 
-        // Fetch Attendance for context
-        const attendance = await Attendance.find({
-            user: req.user._id,
-            companyId: req.companyId,
-            date: { $gte: start, $lte: end }
-        }).select('date clockInIST clockOutIST duration clockIn clockOut');
-
         res.json({
-            ...timesheet.toObject(),
+            ...(timesheet || {}),
             userDetails: fullUser,
             user: fullUser,
             entries,
@@ -280,7 +281,7 @@ const submitTimesheet = async (req, res) => {
 // @access  Private
 const getProjects = async (req, res) => {
     try {
-        const projects = await Project.find({ companyId: req.companyId, isActive: true });
+        const projects = await Project.find({ companyId: req.companyId, isActive: true }).lean();
         res.json(projects);
     } catch (error) {
         console.error(error);
@@ -339,7 +340,7 @@ const getUserTimesheet = async (req, res) => {
             user: targetUserId,
             month: currentMonth,
             companyId: req.companyId
-        });
+        }).lean();
 
         // Fetch WorkLogs
         const [year, month] = currentMonth.split('-');
@@ -354,17 +355,30 @@ const getUserTimesheet = async (req, res) => {
             end = endOfMonth(new Date());
         }
 
-        const workLogs = await WorkLog.find({
-            user: targetUserId,
-            companyId: req.companyId,
-            date: { $gte: start, $lte: end }
-        }).populate({
-            path: 'task',
-            populate: {
-                path: 'module',
-                populate: { path: 'project' }
-            }
-        }).sort({ date: 1 });
+        const [workLogs, attendance, fullTargetUser] = await Promise.all([
+            WorkLog.find({
+                user: targetUserId,
+                companyId: req.companyId,
+                date: { $gte: start, $lte: end }
+            }).populate({
+                path: 'task',
+                populate: {
+                    path: 'module',
+                    populate: { path: 'project' }
+                }
+            }).sort({ date: 1 }).lean(),
+            Attendance.find({
+                user: targetUserId,
+                companyId: req.companyId,
+                date: { $gte: start, $lte: end }
+            }).select('date clockInIST clockOutIST clockIn clockOut duration').lean(),
+            User.findOne({ _id: targetUserId, companyId: req.companyId })
+                .select('firstName lastName email employeeCode')
+                .populate('reportingManagers', 'firstName lastName email')
+                .lean()
+        ]);
+
+        responseData.attendanceLog = attendance;
 
         const entries = workLogs.map(log => ({
             _id: log._id,
@@ -379,33 +393,14 @@ const getUserTimesheet = async (req, res) => {
             rejectionReason: log.rejectionReason
         }));
 
-        let responseData = timesheet ? timesheet.toObject() : {
+        let responseData = timesheet ? timesheet : {
             month: currentMonth,
             status: 'NOT_STARTED'
         };
 
-        // Ensure user is attached
-        let fullTargetUser = null;
-        try {
-            fullTargetUser = await User.findOne({ _id: targetUserId, companyId: req.companyId })
-                .select('firstName lastName email employeeCode')
-                .populate('reportingManagers', 'firstName lastName email');
-        } catch (err) {
-            console.error('Error fetching target user details:', err);
-            // Fallback to what we already fetched
-            fullTargetUser = targetUser;
-        }
-
         responseData.userDetails = fullTargetUser;
         responseData.user = fullTargetUser;
         responseData.entries = entries;
-
-        const attendance = await Attendance.find({
-            user: targetUserId,
-            companyId: req.companyId,
-            date: { $gte: start, $lte: end }
-        }).select('date clockInIST clockOutIST clockIn clockOut duration');
-
         responseData.attendanceLog = attendance;
 
         res.json(responseData);

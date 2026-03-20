@@ -13,7 +13,8 @@ exports.getQueryTypes = async (req, res) => {
             .populate('assignedPerson', 'firstName lastName email')
             .populate('escalationRole', 'name')
             .populate('escalationPerson', 'firstName lastName email')
-            .sort({ name: 1 });
+            .sort({ name: 1 })
+            .lean();
         res.status(200).json({ success: true, data: types });
     } catch (error) {
         console.error('Error fetching query types:', error);
@@ -133,7 +134,8 @@ exports.getMyQueries = async (req, res) => {
         const queries = await HelpdeskQuery.find({ raisedBy: req.user._id })
             .populate('queryType', 'name')
             .populate('assignedTo', 'firstName lastName email')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
 
         res.status(200).json({ success: true, data: queries });
     } catch (error) {
@@ -147,7 +149,8 @@ exports.getAssignedQueries = async (req, res) => {
         const queries = await HelpdeskQuery.find({ assignedTo: req.user._id })
             .populate('raisedBy', 'firstName lastName email')
             .populate('queryType', 'name')
-            .sort({ priority: -1, createdAt: 1 }); // High priority first, then oldest
+            .sort({ priority: -1, createdAt: 1 }) // High priority first, then oldest
+            .lean();
 
         res.status(200).json({ success: true, data: queries });
     } catch (error) {
@@ -207,7 +210,8 @@ exports.getQueryById = async (req, res) => {
             .populate('raisedBy', 'firstName lastName email')
             .populate('assignedTo', 'firstName lastName email')
             .populate('comments.user', 'firstName lastName roles')
-            .populate('queryType', 'name');
+            .populate('queryType', 'name')
+            .lean();
 
         if (!query) {
             return res.status(404).json({ success: false, message: 'Query not found' });
