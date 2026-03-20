@@ -27,4 +27,7 @@ const moduleSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+// Performance Indexes
+moduleSchema.index({ project: 1, companyId: 1 });
+
 module.exports = mongoose.model('Module', moduleSchema);

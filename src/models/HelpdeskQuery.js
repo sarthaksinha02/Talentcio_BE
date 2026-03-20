@@ -74,8 +74,9 @@ const helpdeskQuerySchema = new mongoose.Schema({
 });
 
 // Indexes for performance
-helpdeskQuerySchema.index({ raisedBy: 1, createdAt: -1 });
-helpdeskQuerySchema.index({ assignedTo: 1, status: 1 });
+helpdeskQuerySchema.index({ companyId: 1, status: 1, createdAt: -1 });
+helpdeskQuerySchema.index({ raisedBy: 1, companyId: 1, createdAt: -1 });
+helpdeskQuerySchema.index({ assignedTo: 1, companyId: 1, status: 1 });
 
 // Pre-save hook to generate robust queryId
 helpdeskQuerySchema.pre('validate', async function () {

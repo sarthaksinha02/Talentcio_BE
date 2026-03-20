@@ -58,17 +58,17 @@ const attendanceSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// Ensure one entry per user per day
-attendanceSchema.index({ user: 1, date: 1 }, { unique: true });
+// Ensure one entry per user per day per company
+attendanceSchema.index({ companyId: 1, user: 1, date: 1 }, { unique: true });
 
-// Dashboard: "today's attendance" filter — Attendance.find({ date: { $gte, $lt } })
-attendanceSchema.index({ date: 1 });
+// Dashboard: "today's attendance" filter with company scoping
+attendanceSchema.index({ companyId: 1, date: 1 });
 
-// Dashboard: present/absent count — Attendance.countDocuments({ date:..., status:... })
-attendanceSchema.index({ date: 1, status: 1 });
+// Dashboard: present/absent count with company scoping
+attendanceSchema.index({ companyId: 1, date: 1, status: 1 });
 
-// Dashboard: pending approvals — Attendance.countDocuments({ approvalStatus: 'PENDING' })
-attendanceSchema.index({ approvalStatus: 1 });
+// Dashboard: pending approvals per company
+attendanceSchema.index({ companyId: 1, approvalStatus: 1 });
 
 // Attendance page: user's own history sorted by date
 attendanceSchema.index({ user: 1, date: -1 });

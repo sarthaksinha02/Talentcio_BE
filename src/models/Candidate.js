@@ -252,6 +252,10 @@ const candidateSchema = new mongoose.Schema({
 // Compound index to ensure unique email per hiring request
 candidateSchema.index({ hiringRequestId: 1, email: 1 }, { unique: true });
 
+// Performance Indexes
+candidateSchema.index({ hiringRequestId: 1, status: 1 });
+candidateSchema.index({ companyId: 1, createdAt: -1 });
+
 
 
 module.exports = mongoose.model('Candidate', candidateSchema);

@@ -13,7 +13,11 @@ const cleanupStaleIndexes = async () => {
         const collections = await db.listCollections().toArray();
         const collectionNames = collections.map(c => c.name);
 
-        const targetCollections = ['roles', 'timesheets', 'hiringrequests', 'worklogs', 'attendance', 'querytypes', 'leavebalances', 'leaveconfigs'];
+        const targetCollections = [
+            'roles', 'timesheets', 'hiringrequests', 'worklogs', 'attendance', 
+            'querytypes', 'leavebalances', 'leaveconfigs', 'holidays', 
+            'projects', 'modules', 'tasks', 'helpdeskqueries', 'candidates'
+        ];
 
         for (const collName of targetCollections) {
             if (!collectionNames.includes(collName)) continue;

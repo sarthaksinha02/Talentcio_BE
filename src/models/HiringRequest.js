@@ -109,8 +109,11 @@ const HiringRequestSchema = new mongoose.Schema({
         ref: 'Company',
         index: true
     }
-
 }, { timestamps: true });
+
+// Performance Indexes
+HiringRequestSchema.index({ companyId: 1, status: 1, createdAt: -1 });
+HiringRequestSchema.index({ createdBy: 1, companyId: 1, createdAt: -1 });
 
 // Audit Logs for this specific request
 const HRRAuditLogSchema = new mongoose.Schema({

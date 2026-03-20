@@ -36,4 +36,8 @@ const taskSchema = new mongoose.Schema({
     estimatedHours: Number
 }, { timestamps: true });
 
+// Performance Indexes
+taskSchema.index({ module: 1, companyId: 1, status: 1 });
+taskSchema.index({ assignees: 1, companyId: 1, status: 1 });
+
 module.exports = mongoose.model('Task', taskSchema);

@@ -25,10 +25,10 @@ const holidaySchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-// Ensure unique holiday name per year
-holidaySchema.index({ name: 1, year: 1 }, { unique: true });
+// Ensure unique holiday name per year per company
+holidaySchema.index({ companyId: 1, name: 1, year: 1 }, { unique: true });
 
-// For month-based filtering
-holidaySchema.index({ date: 1 });
+// For month-based filtering with company scoping
+holidaySchema.index({ companyId: 1, date: 1 });
 
 module.exports = mongoose.model('Holiday', holidaySchema);
