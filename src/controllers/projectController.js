@@ -162,8 +162,10 @@ const getProjectHierarchy = async (req, res) => {
         const canViewAssigned = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_assigned'));
         const canViewTeam = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_team'));
 
-        // Strict Check
-        if (!canViewAll && !canViewAssigned && !canViewTeam) {
+        const canLogTime = req.user.permissions.includes('timesheet.submit') || req.user.permissions.includes('timesheet.create');
+        
+        // Strict Check: If not Admin/Read, MUST have view_assigned, view_team, OR be able to log time
+        if (!canViewAll && !canViewAssigned && !canViewTeam && !canLogTime) {
             return res.status(403).json({ message: 'Not authorized to view projects' });
         }
 
@@ -346,8 +348,10 @@ const getModules = async (req, res) => {
         const canViewAssigned = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_assigned'));
         const canViewTeam = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_team'));
 
-        // Strict Check: If not Admin/Read, MUST have view_assigned or view_team
-        if (!canViewAll && !canViewAssigned && !canViewTeam) {
+        const canLogTime = req.user.permissions.includes('timesheet.submit') || req.user.permissions.includes('timesheet.create');
+        
+        // Strict Check: If not Admin/Read, MUST have view_assigned, view_team, OR be able to log time
+        if (!canViewAll && !canViewAssigned && !canViewTeam && !canLogTime) {
             return res.status(403).json({ message: 'Not authorized to view modules for this project' });
         }
 
