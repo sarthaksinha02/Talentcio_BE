@@ -26,6 +26,10 @@ const companySchema = new mongoose.Schema({
         overtimeRules: { type: String, default: '' },
         
         // Module Specific Configurations
+        onboarding: {
+            offerLetterTemplateUrl: { type: String, default: '' },
+            declarationTemplateUrl: { type: String, default: '' },
+        },
         attendance: {
             weeklyOff: { type: [String], default: ['Saturday', 'Sunday'] },
             workingHours: { type: Number, default: 8 },

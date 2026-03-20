@@ -174,6 +174,12 @@ const getProjectHierarchy = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to view projects' });
         }
 
+        // Fetch project modules first to have them available for security and hierarchy
+        const projectModules = await Module.find({ project: id, companyId: req.companyId })
+            .select('_id name startDate endDate status')
+            .lean();
+        const projectModuleIds = projectModules.map(m => m._id);
+
         const isManager = project.manager?._id.toString() === req.user._id.toString();
         const isMember = project.members.some(m => m._id.toString() === req.user._id.toString());
 
@@ -181,10 +187,7 @@ const getProjectHierarchy = async (req, res) => {
         let hasAccess = canViewAll || isManager || isMember || canLogTime;
 
         if (!hasAccess) {
-            const projectModules = await Module.find({ project: id, companyId: req.companyId })
-                .select('_id')
-                .lean();
-            const projectModuleIds = projectModules.map(m => m._id);
+            // Already fetched above
 
             // 1. Check Assigned Task
             if (canViewAssigned || canViewTeam || canLogTime) {
@@ -223,16 +226,18 @@ const getProjectHierarchy = async (req, res) => {
 
 
 
-        // Parallelize fetching of modules and tasks
-        const [modules, tasks] = await Promise.all([
-            Module.find({ project: id, companyId: req.companyId })
-                .sort({ startDate: 1 })
-                .lean(),
+        // Define the missing taskQuery
+        const taskQuery = { module: { $in: projectModuleIds }, companyId: req.companyId };
+
+        // Parallelize fetching of tasks and other data
+        const [tasks] = await Promise.all([
             Task.find(taskQuery)
                 .populate('assignees', 'firstName lastName')
                 .sort({ startDate: 1 })
                 .lean()
         ]);
+
+        const modules = projectModules; // Reuse fetched modules
 
         // Fetch Work Logs for these tasks
         // We need WorkLog model here
@@ -268,16 +273,16 @@ const getProjectHierarchy = async (req, res) => {
 
         // Structure the response
         const hierarchy = {
-            ...project.toObject(),
+            ...project,
             modules: modules.map(module => ({
-                ...module.toObject(),
+                ...module,
                 tasks: tasks
                     .filter(task => task.module.toString() === module._id.toString())
                     .map(task => {
                         const taskLogs = workLogs.filter(log => log.task.toString() === task._id.toString());
                         const totalLogged = taskLogs.reduce((sum, log) => sum + log.hours, 0);
                         return {
-                            ...task.toObject(),
+                            ...task,
                             workLogs: taskLogs,
                             loggedHours: totalLogged
                         };

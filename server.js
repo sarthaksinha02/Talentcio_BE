@@ -76,6 +76,7 @@ require('./src/models/Company');
 require('./src/models/Plan');
 require('./src/models/ActivityLog');
 require('./src/models/SuperAdminUser');
+require('./src/models/OnboardingEmployee');
 
 // Services
 const syncPermissions = require('./src/services/permissionSync');
@@ -101,6 +102,7 @@ const helpdeskRoutes = require('./src/routes/helpdeskRoutes');
 const interviewWorkflowRoutes = require('./src/routes/interviewWorkflowRoutes');
 const notificationRoutes = require('./src/routes/notificationRoutes');
 const discussionRoutes = require('./src/routes/discussionRoutes');
+const onboardingRoutes = require('./src/routes/onboardingRoutes');
 
 // Super Admin Routes
 const superAdminAuthRoutes = require('./src/routes/superAdminRoutes');
@@ -146,6 +148,7 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/helpdesk', helpdeskRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/discussions', discussionRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 
 // Super Admin API Namespace
 app.use('/api/superadmin/auth', superAdminAuthRoutes);
