@@ -14,7 +14,7 @@ async function cleanupIndexes() {
         const collections = await db.listCollections().toArray();
         const collectionNames = collections.map(c => c.name);
 
-        const targetCollections = ['roles', 'timesheets', 'hiringrequests', 'worklogs', 'attendance', 'querytypes', 'leavebalances'];
+        const targetCollections = ['roles', 'timesheets', 'hiringrequests', 'worklogs', 'attendance', 'querytypes', 'leavebalances', 'leaveconfigs'];
 
         for (const collName of targetCollections) {
             if (!collectionNames.includes(collName)) {
