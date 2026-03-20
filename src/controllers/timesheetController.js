@@ -378,7 +378,10 @@ const getUserTimesheet = async (req, res) => {
                 .lean()
         ]);
 
-        responseData.attendanceLog = attendance;
+        let responseData = timesheet ? { ...timesheet } : {
+            month: currentMonth,
+            status: 'NOT_STARTED'
+        };
 
         const entries = workLogs.map(log => ({
             _id: log._id,
@@ -392,11 +395,6 @@ const getUserTimesheet = async (req, res) => {
             status: log.status,
             rejectionReason: log.rejectionReason
         }));
-
-        let responseData = timesheet ? timesheet : {
-            month: currentMonth,
-            status: 'NOT_STARTED'
-        };
 
         responseData.userDetails = fullTargetUser;
         responseData.user = fullTargetUser;
