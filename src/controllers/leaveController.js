@@ -225,29 +225,39 @@ const getMyBalances = async (req, res) => {
         );
 
         const balances = [];
+        
+        // Batch fetch all existing balances for this user/year
+        const existingBalances = await LeaveBalance.find({ 
+            user: req.user._id, 
+            year, 
+            companyId: req.companyId 
+        }).lean();
 
-        for (const policy of policies) {
-            let balance = await LeaveBalance.findOne({ user: req.user._id, leaveType: policy.leaveType, year, companyId: req.companyId }).lean();
+        // Map for quick lookup
+        const balanceMap = new Map(existingBalances.map(b => [b.leaveType, b]));
 
-            // If no balance record, initialize it based on the policy rules
+        // Process all policies in parallel
+        const results = await Promise.all(policies.map(async (policy) => {
+            let balance = balanceMap.get(policy.leaveType);
+
             if (!balance) {
-                const newBalance = await initializeBalance(req.user._id, policy, year, req.companyId);
-                balance = newBalance.toObject();
+                // Initialize missing balance
+                const newB = await initializeBalance(req.user._id, policy, year, req.companyId);
+                balance = newB.toObject();
             } else {
-                // Calculate virtual closing
-                balance.closingBalance = balance.openingBalance + balance.accrued - balance.utilized;
+                balance.closingBalance = (balance.openingBalance || 0) + (balance.accrued || 0) - (balance.utilized || 0);
             }
 
-            balances.push({
+            return {
                 ...balance,
                 policyName: policy.name,
                 policyDescription: policy.description,
-                policyAccrualAmount: policy.accrualAmount, // Pass down to frontend for checking Unlimited (0)
+                policyAccrualAmount: policy.accrualAmount,
                 proofRequiredAbove: policy.proofRequiredAbove
-            });
-        }
+            };
+        }));
 
-        res.json(balances);
+        res.json(results);
     } catch (error) {
         console.error('[LeaveBalance Error]', error);
         res.status(500).json({ message: 'Server Error', details: error.message });
