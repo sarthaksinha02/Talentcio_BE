@@ -51,6 +51,7 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     joiningDate: { type: Date },
     documentDeadline: { type: Date },
     workLocation: { type: String, default: '' },
+    address: { type: String, default: '' },
     probationPeriod: { type: String, default: '6 months' },
 
     // --- Salary / Compensation ---

@@ -30,7 +30,7 @@ const generateTempPassword = (length = 10) => {
 // --- Add a new onboarding employee ---
 exports.addEmployee = async (req, res) => {
     try {
-        const { firstName, lastName, email, phone, designation, department, joiningDate, documentDeadline, offerLetterUrl, offerLetterPublicId } = req.body;
+        const { firstName, lastName, email, phone, designation, department, joiningDate, documentDeadline, offerLetterUrl, offerLetterPublicId, address, workLocation, probationPeriod } = req.body;
 
         if (!firstName || !email) {
             return res.status(400).json({ message: 'First name and email are required' });
@@ -70,6 +70,9 @@ exports.addEmployee = async (req, res) => {
             department: department || '',
             joiningDate: joiningDate || undefined,
             documentDeadline: documentDeadline || undefined,
+            workLocation: workLocation || '',
+            address: address || '',
+            probationPeriod: probationPeriod || '6 months',
             credentialsExpireAt: documentDeadline || undefined,
             offerLetterUrl: offerLetterUrl || '',
             offerLetterPublicId: offerLetterPublicId || '',
@@ -186,6 +189,9 @@ exports.bulkAddEmployees = async (req, res) => {
                     department: emp.department || '',
                     joiningDate: emp.joiningDate || undefined,
                     documentDeadline: emp.documentDeadline || undefined,
+                    workLocation: emp.workLocation || '',
+                    address: emp.address || '',
+                    probationPeriod: emp.probationPeriod || '6 months',
                     credentialsExpireAt: emp.documentDeadline || undefined,
                     documents: defaultDocuments,
                     companyId: req.companyId,
@@ -932,8 +938,8 @@ exports.generateOfferLetter = async (req, res) => {
             employee_full_name: fullName,
             employee_first_name: employee.firstName,
             employee_last_name: employee.lastName,
-            employee_permanent_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || '—',
-            employee_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || '—',
+            employee_permanent_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
+            employee_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
             employee_city: permAddr.city || '—',
             designation: employee.designation || '—',
             department: employee.department || '—',
@@ -1065,7 +1071,8 @@ exports.getMyOfferLetter = async (req, res) => {
             offer_date: formatDate(new Date()),
             employee_full_name: fullName,
             employee_first_name: employee.firstName,
-            employee_permanent_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || '—',
+            employee_permanent_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
+            employee_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
             employee_city: permAddr.city || '—',
             designation: employee.designation || '—',
             department: employee.department || '—',
