@@ -7,12 +7,13 @@ exports.createInterviewWorkflow = async (req, res) => {
     try {
         const { name, description, rounds } = req.body;
 
-        const existingWorkflow = await InterviewWorkflow.findOne({ name });
+        const existingWorkflow = await InterviewWorkflow.findOne({ name, companyId: req.companyId });
         if (existingWorkflow) {
             return res.status(400).json({ message: 'Interview workflow with this name already exists' });
         }
 
         const workflow = new InterviewWorkflow({
+            companyId: req.companyId,
             name,
             description,
             rounds,
@@ -32,7 +33,7 @@ exports.createInterviewWorkflow = async (req, res) => {
 // @access  Private
 exports.getInterviewWorkflows = async (req, res) => {
     try {
-        const workflows = await InterviewWorkflow.find()
+        const workflows = await InterviewWorkflow.find({ companyId: req.companyId })
             .populate('rounds.role', 'name description')
             .populate('createdBy', 'firstName lastName email')
             .sort({ createdAt: -1 });
@@ -48,7 +49,7 @@ exports.getInterviewWorkflows = async (req, res) => {
 // @access  Private
 exports.getInterviewWorkflowById = async (req, res) => {
     try {
-        const workflow = await InterviewWorkflow.findById(req.params.id)
+        const workflow = await InterviewWorkflow.findOne({ _id: req.params.id, companyId: req.companyId })
             .populate('rounds.role', 'name description')
             .populate('createdBy', 'firstName lastName email');
 
@@ -69,14 +70,14 @@ exports.updateInterviewWorkflow = async (req, res) => {
     try {
         const { name, description, rounds, isActive } = req.body;
 
-        let workflow = await InterviewWorkflow.findById(req.params.id);
+        let workflow = await InterviewWorkflow.findOne({ _id: req.params.id, companyId: req.companyId });
         if (!workflow) {
             return res.status(404).json({ message: 'Interview workflow not found' });
         }
 
         // Check name uniqueness if changed
         if (name && name !== workflow.name) {
-            const existingName = await InterviewWorkflow.findOne({ name });
+            const existingName = await InterviewWorkflow.findOne({ name, companyId: req.companyId });
             if (existingName) {
                 return res.status(400).json({ message: 'Interview workflow with this name already exists' });
             }
@@ -90,7 +91,7 @@ exports.updateInterviewWorkflow = async (req, res) => {
         await workflow.save();
 
         // Populate to match GET outputs
-        const updatedWorkflow = await InterviewWorkflow.findById(workflow._id)
+        const updatedWorkflow = await InterviewWorkflow.findOne({ _id: workflow._id, companyId: req.companyId })
             .populate('rounds.role', 'name description')
             .populate('createdBy', 'firstName lastName email');
 
@@ -106,7 +107,7 @@ exports.updateInterviewWorkflow = async (req, res) => {
 // @access  Private
 exports.deleteInterviewWorkflow = async (req, res) => {
     try {
-        const workflow = await InterviewWorkflow.findById(req.params.id);
+        const workflow = await InterviewWorkflow.findOne({ _id: req.params.id, companyId: req.companyId });
         if (!workflow) {
             return res.status(404).json({ message: 'Interview workflow not found' });
         }

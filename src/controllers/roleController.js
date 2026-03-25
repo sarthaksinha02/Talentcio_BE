@@ -7,7 +7,7 @@ const User = require('../models/User');
 // @access  Private
 const getRoles = async (req, res) => {
     try {
-        const roles = await Role.find({}).populate('permissions');
+        const roles = await Role.find({ companyId: req.companyId }).populate('permissions');
         res.json(roles);
     } catch (error) {
         console.error(error);
@@ -23,6 +23,7 @@ const createRole = async (req, res) => {
 
     try {
         const role = await Role.create({
+            companyId: req.companyId,
             name,
             permissions,
             isSystem: false
@@ -39,7 +40,7 @@ const createRole = async (req, res) => {
 // @access  Private (Admin)
 const updateRole = async (req, res) => {
     try {
-        const role = await Role.findById(req.params.id);
+        const role = await Role.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!role) {
             return res.status(404).json({ message: 'Role not found' });
@@ -80,7 +81,7 @@ const getPermissions = async (req, res) => {
         const grouped = permissions.reduce((acc, curr) => {
             let groupName = curr.module || 'OTHER';
 
-            // Custom grouping for granular project permissions
+            // Custom grouping for granular interface control
             if (curr.key.startsWith('business_unit.')) groupName = 'BUSINESS UNITS';
             else if (curr.key.startsWith('client.')) groupName = 'CLIENTS';
             else if (curr.key.startsWith('task.')) groupName = 'TASKS';
@@ -90,6 +91,10 @@ const getPermissions = async (req, res) => {
             else if (curr.key.startsWith('timesheet.')) groupName = 'TIMESHEETS';
             else if (curr.key.startsWith('attendance.')) groupName = 'ATTENDANCE';
             else if (curr.key.startsWith('ta.')) groupName = 'TALENT ACQUISITION';
+            else if (curr.key.startsWith('helpdesk.')) groupName = 'HELP DESK';
+            else if (curr.key.startsWith('discussion.')) groupName = 'DISCUSSIONS';
+            else if (curr.key.startsWith('dossier.')) groupName = 'EMPLOYEE DOSSIER';
+            else if (curr.key.startsWith('leave.')) groupName = 'LEAVES';
 
             if (!acc[groupName]) acc[groupName] = [];
             acc[groupName].push(curr);

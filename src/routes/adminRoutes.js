@@ -8,7 +8,8 @@ const {
     updateUserRole,
     updateUser,
     getMyTeam,
-    getUserById
+    getUserById,
+    toggleUserStatus
 } = require('../controllers/userController');
 const {
     getRoles,
@@ -16,6 +17,7 @@ const {
     updateRole,
     getPermissions
 } = require('../controllers/roleController');
+const { backfillTimesheets } = require('../controllers/migrationController');
 
 router.use(protect);
 
@@ -27,11 +29,15 @@ router.post('/users', authorize('user.create'), createUser);
 router.get('/users/:id', authorize(['user.read', 'attendance.view']), getUserById);
 router.put('/users/:id', authorize('user.update'), updateUser);
 router.put('/users/:id/role', authorize('user.update'), updateUserRole);
+router.patch('/users/:id/status', authorize('user.update'), toggleUserStatus);
 
 // Role Routes
 router.get('/roles', authorize('role.read'), getRoles);
 router.post('/roles', authorize('role.create'), createRole);
 router.put('/roles/:id', authorize('role.update'), updateRole); // Assuming role.update permission exists or re-using role.create
 router.get('/permissions', getPermissions); // Assuming basic auth is enough to view permissions structure
+
+// Migration Routes (Temporary)
+router.post('/migrate-timesheets', authorize('user.update'), backfillTimesheets);
 
 module.exports = router;

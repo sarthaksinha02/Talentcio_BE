@@ -1,9 +1,11 @@
+const mongoose = require('mongoose');
 const Discussion = require('../models/Discussion');
 
 exports.createDiscussion = async (req, res) => {
     try {
         const { title, discussion, status, dueDate } = req.body;
         const newDiscussion = new Discussion({
+            companyId: req.companyId,
             title,
             discussion,
             status: status || 'inprogress',
@@ -28,9 +30,10 @@ exports.getDiscussions = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        const total = await Discussion.countDocuments();
+        const total = await Discussion.countDocuments({ companyId: req.companyId });
 
         let discussions = await Discussion.aggregate([
+            { $match: { companyId: new mongoose.Types.ObjectId(req.companyId) } },
             {
                 $addFields: {
                     isCompleted: { $cond: { if: { $eq: ["$status", "mark as complete"] }, then: 1, else: 0 } }
@@ -57,7 +60,7 @@ exports.getDiscussions = async (req, res) => {
 
 exports.getDiscussionById = async (req, res) => {
     try {
-        const discussion = await Discussion.findById(req.params.id)
+        const discussion = await Discussion.findOne({ _id: req.params.id, companyId: req.companyId })
             .populate('createdBy', 'firstName lastName email profilePicture');
         if (!discussion) return res.status(404).json({ message: 'Discussion not found' });
         res.status(200).json(discussion);
@@ -72,8 +75,7 @@ exports.updateDiscussion = async (req, res) => {
         const { id } = req.params;
         const { title, discussion, status, dueDate } = req.body;
 
-        const updatedDiscussion = await Discussion.findByIdAndUpdate(
-            id,
+        const updatedDiscussion = await Discussion.findOneAndUpdate({ _id: id, companyId: req.companyId },
             { title, discussion, status, dueDate },
             { new: true, runValidators: true }
         ).populate('createdBy', 'firstName lastName email profilePicture');
@@ -88,7 +90,7 @@ exports.updateDiscussion = async (req, res) => {
 
 exports.deleteDiscussion = async (req, res) => {
     try {
-        const discussion = await Discussion.findByIdAndDelete(req.params.id);
+        const discussion = await Discussion.findOneAndDelete({ _id: req.params.id, companyId: req.companyId });
         if (!discussion) return res.status(404).json({ message: 'Discussion not found' });
         res.status(200).json({ message: 'Discussion deleted successfully' });
     } catch (error) {

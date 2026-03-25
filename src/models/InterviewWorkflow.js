@@ -1,8 +1,14 @@
 const mongoose = require('mongoose');
 
 const InterviewWorkflowSchema = new mongoose.Schema({
-    name: { type: String, required: true, unique: true },
+    name: { type: String, required: true },
     description: String,
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        required: true,
+        index: true
+    },
 
     // Levels of interview rounds
     rounds: [{
@@ -16,5 +22,7 @@ const InterviewWorkflowSchema = new mongoose.Schema({
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 
 }, { timestamps: true });
+ 
+InterviewWorkflowSchema.index({ name: 1, companyId: 1 }, { unique: true });
 
 module.exports = mongoose.model('InterviewWorkflow', InterviewWorkflowSchema);

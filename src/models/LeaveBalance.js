@@ -36,12 +36,18 @@ const leaveBalanceSchema = new mongoose.Schema({
     closingBalance: {
         type: Number,
         default: 0
+    },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        required: true,
+        index: true
     }
 }, { timestamps: true });
 
 // Performance Indexes
 leaveBalanceSchema.index({ user: 1, year: 1 });
-// Compound index to ensure one balance record per type per user per year
-leaveBalanceSchema.index({ user: 1, leaveType: 1, year: 1 }, { unique: true });
+// Compound index to ensure one balance record per type per user per year per company
+leaveBalanceSchema.index({ user: 1, leaveType: 1, year: 1, companyId: 1 }, { unique: true });
 
 module.exports = mongoose.model('LeaveBalance', leaveBalanceSchema);

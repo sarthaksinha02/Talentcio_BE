@@ -6,11 +6,12 @@ const LeaveBalance = require('../models/LeaveBalance'); // Added for balance rec
 // @access  Public (Authenticated)
 const getLeavePolicies = async (req, res) => {
     try {
-        const policies = await LeaveConfig.find({ isActive: true });
+        console.log(`[LeaveConfig] GET policies for company: ${req.companyId}`);
+        const policies = await LeaveConfig.find({ isActive: true, companyId: req.companyId });
         res.json(policies);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveConfig GET Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -21,12 +22,18 @@ const updateLeavePolicy = async (req, res) => {
     const {
         leaveType, name, description, employeeTypes, isPaid,
         accrualType, accrualAmount, carryForward, maxCarryForward,
-        encashmentAllowed, maxLimitPerYear,
+        maxLimitPerYear, genderSpecific, applicableGender,
         sandwichRule, allowNegativeBalance, proofRequiredAbove, allowBackdated, proRata
     } = req.body;
 
     try {
-        let policy = await LeaveConfig.findOne({ leaveType });
+        console.log(`[LeaveConfig] POST update for company: ${req.companyId}, policy: ${leaveType}`);
+        
+        if (!req.companyId) {
+            return res.status(400).json({ message: 'Tenant context (companyId) is missing' });
+        }
+
+        let policy = await LeaveConfig.findOne({ leaveType, companyId: req.companyId });
 
         if (policy) {
             // Update existing
@@ -38,8 +45,9 @@ const updateLeavePolicy = async (req, res) => {
             policy.accrualAmount = accrualAmount !== undefined ? accrualAmount : policy.accrualAmount;
             policy.carryForward = carryForward !== undefined ? carryForward : policy.carryForward;
             policy.maxCarryForward = maxCarryForward !== undefined ? maxCarryForward : policy.maxCarryForward;
-            policy.encashmentAllowed = encashmentAllowed !== undefined ? encashmentAllowed : policy.encashmentAllowed;
             policy.maxLimitPerYear = maxLimitPerYear !== undefined ? maxLimitPerYear : policy.maxLimitPerYear;
+            policy.genderSpecific = genderSpecific !== undefined ? genderSpecific : policy.genderSpecific;
+            policy.applicableGender = applicableGender || policy.applicableGender;
 
             // Rules
             policy.sandwichRule = sandwichRule !== undefined ? sandwichRule : policy.sandwichRule;
@@ -70,28 +78,28 @@ const updateLeavePolicy = async (req, res) => {
 
                 // Update all current year balances for this policy across all users
                 await LeaveBalance.updateMany(
-                    { leaveType: policy.leaveType, year: currentYear },
+                    { leaveType: policy.leaveType, year: currentYear, companyId: req.companyId },
                     { $set: { accrued: newAccruedValue } }
                 );
             } catch (calcError) {
                 console.error('[LeaveConfig Update] Failed to propagate balance changes:', calcError);
-                // System logs error, but policy itself still saved successfully.
             }
 
             return res.json(policy);
         } else {
             // Create New
             policy = await LeaveConfig.create({
+                companyId: req.companyId,
                 leaveType, name, description, employeeTypes, isPaid,
                 accrualType, accrualAmount, carryForward, maxCarryForward,
-                encashmentAllowed, maxLimitPerYear,
+                maxLimitPerYear, genderSpecific, applicableGender,
                 sandwichRule, allowNegativeBalance, proofRequiredAbove, allowBackdated, proRata
             });
             return res.status(201).json(policy);
         }
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveConfig POST Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -100,25 +108,26 @@ const updateLeavePolicy = async (req, res) => {
 // @access  Private (Admin)
 const seedDefaultPolicies = async (req, res) => {
     try {
+        console.log(`[LeaveConfig] SEED for company: ${req.companyId}`);
         const defaults = [
             { leaveType: 'CL', name: 'Casual Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1, maxLimitPerYear: 12, carryForward: false },
             { leaveType: 'SL', name: 'Sick Leave', isPaid: true, accrualType: 'Yearly', accrualAmount: 8, maxLimitPerYear: 8, carryForward: false },
-            { leaveType: 'EL', name: 'Earned Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1.25, maxLimitPerYear: 15, carryForward: true, maxCarryForward: 30, encashmentAllowed: true }, // Approx 15/year logic varies
+            { leaveType: 'EL', name: 'Earned Leave', isPaid: true, accrualType: 'Monthly', accrualAmount: 1.25, maxLimitPerYear: 15, carryForward: true, maxCarryForward: 30 }, // Approx 15/year logic varies
             { leaveType: 'LOP', name: 'Loss of Pay', isPaid: false, accrualType: 'None', maxLimitPerYear: 0, carryForward: false },
             { leaveType: 'WFH', name: 'Work From Home', isPaid: true, accrualType: 'Policy', maxLimitPerYear: 0, carryForward: false }
         ];
 
         for (const def of defaults) {
-            const exists = await LeaveConfig.findOne({ leaveType: def.leaveType });
+            const exists = await LeaveConfig.findOne({ leaveType: def.leaveType, companyId: req.companyId });
             if (!exists) {
-                await LeaveConfig.create(def);
+                await LeaveConfig.create({ ...def, companyId: req.companyId });
             }
         }
 
         res.json({ message: 'Default policies seeded' });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveConfig SEED Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -129,7 +138,7 @@ const { runMonthlyAccrual, runYearlyProcessing } = require('../services/accrualS
 // @access  Admin
 const triggerMonthlyAccrual = async (req, res) => {
     try {
-        const result = await runMonthlyAccrual();
+        const result = await runMonthlyAccrual(req.companyId);
         res.json(result);
     } catch (error) {
         console.error(error);
@@ -143,7 +152,7 @@ const triggerMonthlyAccrual = async (req, res) => {
 const triggerYearlyAccrual = async (req, res) => {
     try {
         const { year } = req.body;
-        const result = await runYearlyProcessing(year);
+        const result = await runYearlyProcessing(req.companyId, year);
         res.json(result);
     } catch (error) {
         console.error(error);
@@ -156,7 +165,7 @@ const triggerYearlyAccrual = async (req, res) => {
 // @access  Private (Admin)
 const deleteLeavePolicy = async (req, res) => {
     try {
-        const policy = await LeaveConfig.findById(req.params.id);
+        const policy = await LeaveConfig.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!policy) {
             return res.status(404).json({ message: 'Policy not found' });

@@ -7,6 +7,11 @@ const candidateSchema = new mongoose.Schema({
         required: true,
         index: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
 
     // Resume Information
     resumeUrl: {
@@ -246,6 +251,10 @@ const candidateSchema = new mongoose.Schema({
 
 // Compound index to ensure unique email per hiring request
 candidateSchema.index({ hiringRequestId: 1, email: 1 }, { unique: true });
+
+// Performance Indexes
+candidateSchema.index({ hiringRequestId: 1, status: 1 });
+candidateSchema.index({ companyId: 1, createdAt: -1 });
 
 
 

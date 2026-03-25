@@ -97,13 +97,23 @@ const HiringRequestSchema = new mongoose.Schema({
     currentApprovalLevel: { type: Number, default: 1 },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    jobDescription: { type: String },
+    jobDescriptionFile: { type: String }, // Cloudinary URL
 
     // Tracking Reopened Requisitions
     previousRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' },
     reopenedToId: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' },
-    closedAt: { type: Date }
-
+    closedAt: { type: Date },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    }
 }, { timestamps: true });
+
+// Performance Indexes
+HiringRequestSchema.index({ companyId: 1, status: 1, createdAt: -1 });
+HiringRequestSchema.index({ createdBy: 1, companyId: 1, createdAt: -1 });
 
 // Audit Logs for this specific request
 const HRRAuditLogSchema = new mongoose.Schema({

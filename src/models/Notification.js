@@ -7,6 +7,11 @@ const notificationSchema = new mongoose.Schema({
         required: true,
         index: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     title: {
         type: String,
         required: true

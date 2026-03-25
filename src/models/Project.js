@@ -6,6 +6,11 @@ const projectSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     client: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Client'
@@ -32,5 +37,9 @@ const projectSchema = new mongoose.Schema({
     startDate: Date,
     dueDate: Date
 }, { timestamps: true });
+
+// Performance Indexes
+projectSchema.index({ companyId: 1, isActive: 1 });
+projectSchema.index({ companyId: 1, status: 1 });
 
 module.exports = mongoose.model('Project', projectSchema);

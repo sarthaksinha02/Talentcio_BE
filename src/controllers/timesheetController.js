@@ -2,7 +2,7 @@ const Timesheet = require('../models/Timesheet');
 const Project = require('../models/Project');
 const User = require('../models/User');
 const Attendance = require('../models/Attendance');
-const { startOfMonth, endOfMonth, format, startOfDay } = require('date-fns');
+const { startOfMonth, endOfMonth, startOfWeek, endOfWeek, format, startOfDay, endOfDay, addWeeks, subWeeks } = require('date-fns');
 const WorkLog = require('../models/WorkLog');
 
 // @desc    Get Current Month Timesheet
@@ -18,28 +18,30 @@ const getCurrentTimesheet = async (req, res) => {
 
         let timesheet = await Timesheet.findOne({
             user: req.user._id,
-            month: currentMonth
-        });
+            month: currentMonth,
+            companyId: req.companyId
+        }).lean();
 
         if (!timesheet) {
             // Create a draft if it doesn't exist
             timesheet = await Timesheet.create({
                 user: req.user._id,
                 month: currentMonth,
+                companyId: req.companyId,
                 status: 'DRAFT',
                 rejectionReason: ''
             });
         }
 
-        // Populate User and Supervisor (Explicitly fetch to ensure data availability)
+        // Populate User and Supervisor
         let fullUser = null;
         try {
             fullUser = await User.findById(req.user._id)
                 .select('firstName lastName email employeeCode')
-                .populate('reportingManagers', 'firstName lastName email');
+                .populate('reportingManagers', 'firstName lastName email')
+                .lean();
         } catch (err) {
             console.error('Error populating user details:', err);
-            // Fallback to basic req.user info if fetch fails
             fullUser = {
                 firstName: req.user.firstName,
                 lastName: req.user.lastName,
@@ -48,21 +50,54 @@ const getCurrentTimesheet = async (req, res) => {
             };
         }
 
-        // Fetch WorkLogs for this month (Single Source of Truth)
-        const [year, month] = currentMonth.split('-');
-        const start = startOfMonth(new Date(parseInt(year), parseInt(month) - 1));
-        const end = endOfMonth(new Date(parseInt(year), parseInt(month) - 1));
+        // Fetch WorkLogs for this period based on cycle
+        const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
+        let start, end;
 
-        const workLogs = await WorkLog.find({
-            user: req.user._id,
-            date: { $gte: start, $lte: end }
-        }).populate({
-            path: 'task',
-            populate: {
-                path: 'module',
-                populate: { path: 'project' }
+        if (cycle === 'Weekly') {
+            if (currentMonth.includes('-W')) {
+                const [year, weekStr] = currentMonth.split('-W');
+                const weekNum = parseInt(weekStr);
+                const firstDayOfYear = new Date(parseInt(year), 0, 1);
+                const daysToFirstMonday = (8 - firstDayOfYear.getDay()) % 7;
+                const firstMonday = new Date(parseInt(year), 0, 1 + daysToFirstMonday);
+                start = startOfWeek(addWeeks(firstMonday, weekNum - 1));
+                end = endOfWeek(start);
+            } else {
+                // Fallback context
+                const date = new Date(currentMonth + '-01');
+                start = startOfWeek(date);
+                end = endOfWeek(date);
             }
-        }).sort({ date: 1 });
+        } else if (cycle === 'Daily') {
+            start = startOfDay(new Date(currentMonth));
+            end = endOfDay(start);
+        } else {
+            // Monthly
+            const [year, month] = currentMonth.split('-');
+            const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+            start = startOfMonth(date);
+            end = endOfMonth(date);
+        }
+
+        const [workLogs, attendance] = await Promise.all([
+            WorkLog.find({
+                user: req.user._id,
+                companyId: req.companyId,
+                date: { $gte: start, $lte: end }
+            }).populate({
+                path: 'task',
+                populate: {
+                    path: 'module',
+                    populate: { path: 'project' }
+                }
+            }).sort({ date: 1 }).lean(),
+            Attendance.find({
+                user: req.user._id,
+                companyId: req.companyId,
+                date: { $gte: start, $lte: end }
+            }).select('date clockInIST clockOutIST duration clockIn clockOut').lean()
+        ]);
 
         const entries = workLogs.map(log => ({
             _id: log._id,
@@ -77,16 +112,10 @@ const getCurrentTimesheet = async (req, res) => {
             rejectionReason: log.rejectionReason
         }));
 
-        // Fetch Attendance for context (unchanged)
-        const attendance = await Attendance.find({
-            user: req.user._id,
-            date: { $gte: start, $lte: end }
-        }).select('date clockInIST clockOutIST duration clockIn clockOut');
-
         res.json({
-            ...timesheet.toObject(),
-            userDetails: fullUser, // Distinct key to avoid collision
-            user: fullUser,        // Backup
+            ...(timesheet || {}),
+            userDetails: fullUser,
+            user: fullUser,
             entries,
             attendanceLog: attendance
         });
@@ -105,7 +134,10 @@ const addEntry = async (req, res) => {
     try {
         // 1. Resolve Target User
         let targetUserId = req.user._id;
-        const isAdmin = req.user.roles.some(r => r.name === 'Admin');
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.create');
 
         if (userId && isAdmin) {
             targetUserId = userId;
@@ -117,10 +149,20 @@ const addEntry = async (req, res) => {
         }
 
         // Check for Existing Timesheet Logic
-        const month = format(new Date(entryDate), 'yyyy-MM');
+        const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
+        let periodId;
+        if (cycle === 'Weekly') {
+            periodId = format(new Date(entryDate), "yyyy-'W'II"); // ISO Week
+        } else if (cycle === 'Daily') {
+            periodId = format(new Date(entryDate), 'yyyy-MM-dd');
+        } else {
+            periodId = format(new Date(entryDate), 'yyyy-MM');
+        }
+
         const timesheet = await Timesheet.findOne({
             user: targetUserId,
-            month: month
+            month: periodId,
+            companyId: req.companyId
         });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
@@ -167,6 +209,7 @@ const addEntry = async (req, res) => {
         const workLog = new WorkLog({
             user: targetUserId,
             date: entryDate,
+            companyId: req.companyId,
             task: taskId, // This implies taskId is required. 
             // If we support Project-only logs, we'd need a Task to hold it (e.g. "General Task" under project)
             // But WorkLog schema likely has 'task' as ref. 
@@ -205,18 +248,25 @@ const addEntry = async (req, res) => {
 // @route   POST /api/timesheet/submit
 // @access  Private
 const submitTimesheet = async (req, res) => {
-    const { month } = req.body;
+    const { month } = req.body; // In weekly/daily mode, this is the periodId (e.g. 2024-W12)
     try {
+        const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
+        
         const timesheet = await Timesheet.findOne({
             user: req.user._id,
-            month: month
+            month: month,
+            companyId: req.companyId
         });
 
         if (!timesheet) {
             return res.status(404).json({ message: 'Timesheet not found' });
         }
 
+        // For now, we allow the submission but we could add cycle-specific validations here
+        // (e.g. ensuring a weekly timesheet is only submitted at the end of the week)
+
         timesheet.status = 'SUBMITTED';
+        timesheet.submissionCycle = cycle;
         await timesheet.save();
 
         res.json(timesheet);
@@ -231,7 +281,7 @@ const submitTimesheet = async (req, res) => {
 // @access  Private
 const getProjects = async (req, res) => {
     try {
-        const projects = await Project.find({ isActive: true });
+        const projects = await Project.find({ companyId: req.companyId, isActive: true }).lean();
         res.json(projects);
     } catch (error) {
         console.error(error);
@@ -245,7 +295,8 @@ const getProjects = async (req, res) => {
 const createProject = async (req, res) => {
     try {
         const project = await Project.create({
-            ...req.body
+            ...req.body,
+            companyId: req.companyId
         });
         res.json(project);
     } catch (error) {
@@ -266,26 +317,30 @@ const getUserTimesheet = async (req, res) => {
         if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
 
         // 1. Check Permissions
-        const targetUser = await User.findById(targetUserId);
+        const targetUser = await User.findOne({ _id: targetUserId, companyId: req.companyId });
 
         if (!targetUser) {
             return res.status(404).json({ message: 'User not found' });
         }
 
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || 
+             req.user.permissions?.includes('timesheet.view') ||
+             req.user.permissions?.includes('attendance.view');
+
         const isManager = targetUser.reportingManagers?.some(m => m.toString() === req.user._id.toString());
-        const hasRole = (name) => req.user.roles && req.user.roles.some(r => r.name === name);
-        const hasPermission = (key) => req.user.roles && req.user.roles.some(r => r.permissions && r.permissions.some(p => p.key === key));
 
-        const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve') || hasPermission('attendance.view') || hasPermission('timesheet.view');
-
-        if (!isManager && !isAdmin) {
+        if (!isManager && !isAdmin && targetUserId !== req.user._id.toString()) {
             return res.status(403).json({ message: 'Not authorized to view this timesheet' });
         }
 
         let timesheet = await Timesheet.findOne({
             user: targetUserId,
-            month: currentMonth
-        });
+            month: currentMonth,
+            companyId: req.companyId
+        }).lean();
 
         // Fetch WorkLogs
         const [year, month] = currentMonth.split('-');
@@ -300,16 +355,33 @@ const getUserTimesheet = async (req, res) => {
             end = endOfMonth(new Date());
         }
 
-        const workLogs = await WorkLog.find({
-            user: targetUserId,
-            date: { $gte: start, $lte: end }
-        }).populate({
-            path: 'task',
-            populate: {
-                path: 'module',
-                populate: { path: 'project' }
-            }
-        }).sort({ date: 1 });
+        const [workLogs, attendance, fullTargetUser] = await Promise.all([
+            WorkLog.find({
+                user: targetUserId,
+                companyId: req.companyId,
+                date: { $gte: start, $lte: end }
+            }).populate({
+                path: 'task',
+                populate: {
+                    path: 'module',
+                    populate: { path: 'project' }
+                }
+            }).sort({ date: 1 }).lean(),
+            Attendance.find({
+                user: targetUserId,
+                companyId: req.companyId,
+                date: { $gte: start, $lte: end }
+            }).select('date clockInIST clockOutIST clockIn clockOut duration').lean(),
+            User.findOne({ _id: targetUserId, companyId: req.companyId })
+                .select('firstName lastName email employeeCode')
+                .populate('reportingManagers', 'firstName lastName email')
+                .lean()
+        ]);
+
+        let responseData = timesheet ? { ...timesheet } : {
+            month: currentMonth,
+            status: 'NOT_STARTED'
+        };
 
         const entries = workLogs.map(log => ({
             _id: log._id,
@@ -324,32 +396,9 @@ const getUserTimesheet = async (req, res) => {
             rejectionReason: log.rejectionReason
         }));
 
-        let responseData = timesheet ? timesheet.toObject() : {
-            month: currentMonth,
-            status: 'NOT_STARTED'
-        };
-
-        // Ensure user is attached
-        let fullTargetUser = null;
-        try {
-            fullTargetUser = await User.findById(targetUserId)
-                .select('firstName lastName email employeeCode')
-                .populate('reportingManagers', 'firstName lastName email');
-        } catch (err) {
-            console.error('Error fetching target user details:', err);
-            // Fallback to what we already fetched
-            fullTargetUser = targetUser;
-        }
-
         responseData.userDetails = fullTargetUser;
         responseData.user = fullTargetUser;
         responseData.entries = entries;
-
-        const attendance = await Attendance.find({
-            user: targetUserId,
-            date: { $gte: start, $lte: end }
-        }).select('date clockInIST clockOutIST clockIn clockOut duration');
-
         responseData.attendanceLog = attendance;
 
         res.json(responseData);
@@ -374,22 +423,27 @@ const getPendingTimesheets = async (req, res) => {
 
         // Check if user is Admin
         // req.user.roles is populated with Role objects
-        const isAdmin = req.user.roles && req.user.roles.some(role => role.name === 'Admin');
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.approve');
 
         if (isAdmin) {
             // Admin sees ALL submitted timesheets
             timesheets = await Timesheet.find({
-                status: 'SUBMITTED'
+                status: 'SUBMITTED',
+                companyId: req.companyId
             }).populate('user', 'firstName lastName email employeeCode')
                 .sort({ month: -1 });
         } else {
             // Regular Manager: Find subordinates (where I am one of the reporting managers)
-            const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
+            const subordinates = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
             const subordinateIds = subordinates.map(u => u._id);
 
             timesheets = await Timesheet.find({
                 user: { $in: subordinateIds },
-                status: 'SUBMITTED'
+                status: 'SUBMITTED',
+                companyId: req.companyId
             }).populate('user', 'firstName lastName email employeeCode')
                 .sort({ month: -1 });
         }
@@ -402,6 +456,7 @@ const getPendingTimesheets = async (req, res) => {
 
             const workLogs = await WorkLog.find({
                 user: ts.user._id,
+                companyId: req.companyId,
                 date: { $gte: start, $lte: end }
             }).populate({
                 path: 'task',
@@ -443,7 +498,7 @@ const getPendingTimesheets = async (req, res) => {
 const approveTimesheet = async (req, res) => {
     const { status, reason, type = 'FULL', rejectedEntryIds = [] } = req.body;
     try {
-        const timesheet = await Timesheet.findById(req.params.id)
+        const timesheet = await Timesheet.findOne({ _id: req.params.id, companyId: req.companyId })
             .populate('user', 'reportingManagers');
 
         if (!timesheet) {
@@ -453,9 +508,10 @@ const approveTimesheet = async (req, res) => {
         const targetUser = timesheet.user;
         const isManager = targetUser.reportingManagers?.some(m => m.toString() === req.user._id.toString());
 
-        const hasRole = (name) => req.user.roles && req.user.roles.some(r => r.name === name);
-        const hasPermission = (key) => req.user.roles && req.user.roles.some(r => r.permissions && r.permissions.some(p => p.key === key));
-        const isAdmin = hasRole('Admin') || hasPermission('timesheet.approve');
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.approve');
 
         if (!isManager && !isAdmin) {
             return res.status(403).json({ message: 'Not authorized' });
@@ -472,7 +528,7 @@ const approveTimesheet = async (req, res) => {
 
             if (rejectedEntryIds.length > 0) {
                 await WorkLog.updateMany(
-                    { _id: { $in: rejectedEntryIds } },
+                    { _id: { $in: rejectedEntryIds }, companyId: req.companyId },
                     { $set: { status: 'REJECTED', rejectionReason: reason } }
                 );
             }
@@ -489,6 +545,7 @@ const approveTimesheet = async (req, res) => {
             await WorkLog.updateMany(
                 {
                     user: targetUser._id,
+                    companyId: req.companyId,
                     date: { $gte: start, $lte: end }
                 },
                 { $set: updateDoc }
@@ -510,7 +567,7 @@ const approveTimesheet = async (req, res) => {
 const updateEntry = async (req, res) => {
     const { hours, description } = req.body;
     try {
-        const workLog = await WorkLog.findById(req.params.entryId).populate('user');
+        const workLog = await WorkLog.findOne({ _id: req.params.entryId, companyId: req.companyId }).populate('user');
 
         if (!workLog) {
             return res.status(404).json({ message: 'Entry (WorkLog) not found' });
@@ -521,14 +578,17 @@ const updateEntry = async (req, res) => {
 
         const isOwner = owner._id.toString() === requestor._id.toString();
         const isManager = owner.reportingManagers?.some(m => m.toString() === requestor._id.toString());
-        const isAdmin = requestor.roles && requestor.roles.some(r => r.name === 'Admin');
+        const isAdmin = requestor.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || requestor.permissions?.includes('*') || requestor.permissions?.includes('timesheet.update');
 
         if (!isOwner && !isManager && !isAdmin) {
             return res.status(403).json({ message: 'Not authorized' });
         }
 
         const month = format(workLog.date, 'yyyy-MM');
-        const timesheet = await Timesheet.findOne({ user: owner._id, month });
+        const timesheet = await Timesheet.findOne({ user: owner._id, month, companyId: req.companyId });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
             if (!isManager && !isAdmin) {

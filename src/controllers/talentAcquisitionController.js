@@ -16,7 +16,7 @@ const generateRequestId = async () => {
 // --- createHiringRequest ---
 exports.createHiringRequest = async (req, res) => {
     try {
-        const { client, roleDetails, purpose, requirements, hiringDetails, ownership, replacementDetails, interviewWorkflowId, previousRequestId } = req.body;
+        const { client, roleDetails, purpose, requirements, hiringDetails, ownership, replacementDetails, interviewWorkflowId, previousRequestId, jobDescription, jobDescriptionFile } = req.body;
         const submitNow = req.query.submit === 'true';
 
         // validations...
@@ -25,11 +25,11 @@ exports.createHiringRequest = async (req, res) => {
 
         let workflow;
         if (req.body.workflowId) {
-            workflow = await ApprovalWorkflow.findById(req.body.workflowId).populate('levels.role', 'name');
+            workflow = await ApprovalWorkflow.findOne({ _id: req.body.workflowId, companyId: req.companyId }).populate('levels.role', 'name');
         }
 
         if (!workflow) {
-            workflow = await ApprovalWorkflow.findOne({ isActive: true })
+            workflow = await ApprovalWorkflow.findOne({ isActive: true, companyId: req.companyId })
                 .populate('levels.role', 'name');
         }
 
@@ -59,7 +59,10 @@ exports.createHiringRequest = async (req, res) => {
             currentApprovalLevel: approvals.length > 0 ? 1 : 0,
             status: submitNow ? 'Submitted' : 'Draft',
             createdBy: req.user._id,
-            previousRequestId: previousRequestId || undefined
+            companyId: req.companyId,
+            previousRequestId: previousRequestId || undefined,
+            jobDescription,
+            jobDescriptionFile
         });
 
         if (submitNow) {
@@ -111,10 +114,11 @@ exports.createHiringRequest = async (req, res) => {
 // --- getHiringRequests ---
 exports.getHiringRequests = async (req, res) => {
     try {
-        const { status, page = 1, limit = 10 } = req.query;
-        let query = {};
+        const { status, page = 1, limit = 10, client } = req.query;
+        let query = { companyId: req.companyId };
 
         if (status) query.status = status;
+        if (client) query.client = client;
 
         // Use permissions to filter what they see
         // Admin/HR sees all. ta.view sees all. Manager sees own.
@@ -171,7 +175,7 @@ exports.getHiringRequestById = async (req, res) => {
         if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
             return res.status(400).json({ message: 'Invalid Hiring Request ID format' });
         }
-        const request = await HiringRequest.findById(req.params.id)
+        const request = await HiringRequest.findOne({ _id: req.params.id, companyId: req.companyId })
             .populate('ownership.hiringManager', 'firstName lastName email')
             .populate('ownership.recruiter', 'firstName lastName email')
             .populate('roleDetails.reportingManager', 'firstName lastName')
@@ -230,7 +234,7 @@ exports.updateHiringRequest = async (req, res) => {
         const { id } = req.params;
         const updates = req.body;
 
-        const request = await HiringRequest.findById(id);
+        const request = await HiringRequest.findOne({ _id: id, companyId: req.companyId });
         if (!request) return res.status(404).json({ message: 'Not found' });
 
         if (request.status === 'Closed') {
@@ -240,7 +244,8 @@ exports.updateHiringRequest = async (req, res) => {
         // Apply updates to request securely (prevent mass assignment)
         const allowedUpdates = [
             'client', 'roleDetails', 'purpose', 'requirements',
-            'hiringDetails', 'replacementDetails', 'ownership', 'interviewWorkflowId'
+            'hiringDetails', 'replacementDetails', 'ownership', 'interviewWorkflowId',
+            'jobDescription', 'jobDescriptionFile'
         ];
 
         allowedUpdates.forEach(field => {
@@ -258,7 +263,7 @@ exports.updateHiringRequest = async (req, res) => {
         // If workflow is specified (either new or existing), rebuild approval chain
         const workflowId = req.body.workflowId || request.workflowId;
         if (workflowId) {
-            const workflow = await ApprovalWorkflow.findById(workflowId).populate('levels.role', 'name');
+            const workflow = await ApprovalWorkflow.findOne({ _id: workflowId, companyId: req.companyId }).populate('levels.role', 'name');
 
             if (workflow) {
                 request.workflowId = workflow._id;
@@ -331,7 +336,7 @@ exports.approveHiringRequest = async (req, res) => {
         const { level, comments } = req.body; // 'L1' or 'Final' for old flow
 
         // Fetch request with populated approvers for authorization check
-        const request = await HiringRequest.findById(id)
+        const request = await HiringRequest.findOne({ _id: id, companyId: req.companyId })
             .populate('approvalChain.approvers', '_id firstName lastName email');
 
         if (!request) return res.status(404).json({ message: 'Not found' });
@@ -473,7 +478,7 @@ exports.rejectHiringRequest = async (req, res) => {
         const { comments, level } = req.body;
 
         // Fetch request with populated approvers for authorization check
-        const request = await HiringRequest.findById(id)
+        const request = await HiringRequest.findOne({ _id: id, companyId: req.companyId })
             .populate('approvalChain.approvers', '_id firstName lastName email');
 
         if (!request) return res.status(404).json({ message: 'Not found' });
@@ -582,7 +587,7 @@ exports.closeHiringRequest = async (req, res) => {
 exports.getPreviousCandidates = async (req, res) => {
     try {
         const { id } = req.params;
-        const currentReq = await HiringRequest.findById(id).select('previousRequestId');
+        const currentReq = await HiringRequest.findOne({ _id: id, companyId: req.companyId }).select('previousRequestId');
         if (!currentReq || !currentReq.previousRequestId) {
             return res.status(200).json([]);
         }
@@ -592,7 +597,7 @@ exports.getPreviousCandidates = async (req, res) => {
         const legacyRequisitions = []; // ordered: pId is most recent previous
 
         while (pId) {
-            const r = await HiringRequest.findById(pId)
+            const r = await HiringRequest.findOne({ _id: pId, companyId: req.companyId })
                 .select('requestId status createdAt closedAt previousRequestId roleDetails')
                 .lean();
             if (!r) break;
@@ -626,6 +631,26 @@ exports.getPreviousCandidates = async (req, res) => {
     }
 };
 
+// --- uploadJDFile ---
+exports.uploadJDFile = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No file uploaded' });
+        }
+
+        // Return the secure URL from Cloudinary
+        res.status(200).json({
+            success: true,
+            message: 'File uploaded successfully',
+            fileUrl: req.file.path // This will be the Cloudinary secure_url created by multer-storage-cloudinary
+        });
+    } catch (error) {
+        console.error('Error uploading JD file:', error);
+        res.status(500).json({ success: false, message: 'Server Error during file upload', error: error.message });
+    }
+};
+
+
 // --- transferCandidate ---
 exports.transferCandidate = async (req, res) => {
     try {
@@ -635,12 +660,12 @@ exports.transferCandidate = async (req, res) => {
         if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
         // Find the most recent requisition in the chain
-        let currentReq = await HiringRequest.findById(candidate.hiringRequestId).select('reopenedToId');
+        let currentReq = await HiringRequest.findOne({ _id: candidate.hiringRequestId, companyId: req.companyId }).select('reopenedToId');
         let newestReqId = currentReq ? currentReq._id : null;
 
         while (currentReq && currentReq.reopenedToId) {
             newestReqId = currentReq.reopenedToId;
-            currentReq = await HiringRequest.findById(currentReq.reopenedToId).select('reopenedToId hover');
+            currentReq = await HiringRequest.findOne({ _id: currentReq.reopenedToId, companyId: req.companyId }).select('reopenedToId hover');
         }
 
         if (!newestReqId || newestReqId.toString() === candidate.hiringRequestId.toString()) {
@@ -704,9 +729,9 @@ exports.getClientAnalytics = async (req, res) => {
         clientName = decodeURIComponent(clientName);
 
         // Fetch all hiring requests for this client mainly to build the dropdown list
-        const allClientReqs = await HiringRequest.find({ client: clientName }).select('_id roleDetails.title status').lean();
+        const allClientReqs = await HiringRequest.find({ client: clientName, companyId: req.companyId }).select('_id roleDetails.title status').lean();
 
-        let hrQuery = { client: clientName };
+        let hrQuery = { client: clientName, companyId: req.companyId };
         if (hiringRequestId) {
             hrQuery._id = hiringRequestId;
         }
@@ -872,7 +897,7 @@ exports.getGlobalAnalytics = async (req, res) => {
         const userPermissions = req.user.roles.flatMap(role => (role.permissions || []).map(p => p.key));
         const hasTaView = userPermissions.includes('ta.view') || userPermissions.includes('*');
 
-        let hrQuery = {};
+        let hrQuery = { companyId: req.companyId };
         if (!isAdmin && !hasTaView) {
             const candidatesWithUserAsInterviewer = await Candidate.find({
                 'interviewRounds.assignedTo': req.user._id
@@ -1195,5 +1220,80 @@ exports.getGlobalAnalytics = async (req, res) => {
     } catch (error) {
         console.error('getGlobalAnalytics error:', error);
         res.status(500).json({ success: false, message: 'Internal Server Error', error: error.message });
+    }
+};
+
+// --- uploadJDFile ---
+exports.uploadJDFile = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No file uploaded' });
+        }
+
+        // The file is already uploaded to Cloudinary by the multer middleware
+        // defined in the routes (config/cloudinary)
+        const fileUrl = req.file.path; // Cloudinary URL
+
+        res.status(200).json({
+            message: 'JD file uploaded successfully',
+            url: fileUrl
+        });
+    } catch (error) {
+        console.error('Error uploading JD file:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// --- getTAClients ---
+exports.getTAClients = async (req, res) => {
+    try {
+        const query = { companyId: req.companyId };
+        
+        // Find all unique client names that have hiring requests
+        const clients = await HiringRequest.distinct('client', query);
+        
+        const clientStats = await Promise.all(clients.map(async (clientName) => {
+            const runningCount = await HiringRequest.countDocuments({ 
+                companyId: req.companyId, 
+                client: clientName, 
+                status: 'Approved'
+            });
+            const pendingCount = await HiringRequest.countDocuments({ 
+                companyId: req.companyId, 
+                client: clientName, 
+                status: { $in: ['Pending_Approval', 'Pending_L1', 'Pending_Final', 'Submitted'] } 
+            });
+            const closedCount = await HiringRequest.countDocuments({ 
+                companyId: req.companyId, 
+                client: clientName, 
+                status: 'Closed' 
+            });
+            const rejectedCount = await HiringRequest.countDocuments({ 
+                companyId: req.companyId, 
+                client: clientName, 
+                status: 'Rejected' 
+            });
+            const totalCount = await HiringRequest.countDocuments({
+                companyId: req.companyId,
+                client: clientName
+            });
+
+            return {
+                name: clientName,
+                activePositions: runningCount,
+                pendingPositions: pendingCount,
+                closedPositions: closedCount,
+                rejectedPositions: rejectedCount,
+                totalPositions: totalCount
+            };
+        }));
+
+        // Sort by active positions descending
+        clientStats.sort((a, b) => b.activePositions - a.activePositions);
+
+        res.status(200).json(clientStats);
+    } catch (error) {
+        console.error('getTAClients error:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };

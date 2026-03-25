@@ -3,7 +3,7 @@ const Meeting = require('../models/Meeting');
 // Get all meetings (can be filtered by type, date, or user's involvement)
 const getMeetings = async (req, res) => {
     try {
-        const query = {};
+        const query = { companyId: req.companyId };
 
         // Basic filtering, you could add more (e.g., date range, type)
         if (req.query.meetingType) query.meetingType = req.query.meetingType;
@@ -36,7 +36,7 @@ const getMeetings = async (req, res) => {
 // Get single meeting by ID
 const getMeetingById = async (req, res) => {
     try {
-        const meeting = await Meeting.findById(req.params.id)
+        const meeting = await Meeting.findOne({ _id: req.params.id, companyId: req.companyId })
             .populate('host', 'firstName lastName')
             .populate('attendees', 'firstName lastName')
             .populate('absentees', 'firstName lastName')
@@ -73,7 +73,7 @@ const createMeeting = async (req, res) => {
             req.body.host = req.user._id;
         }
 
-        const meeting = await Meeting.create(req.body);
+        const meeting = await Meeting.create({ ...req.body, companyId: req.companyId });
         res.status(201).json(meeting);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -83,7 +83,7 @@ const createMeeting = async (req, res) => {
 // Update a meeting
 const updateMeeting = async (req, res) => {
     try {
-        const meeting = await Meeting.findById(req.params.id);
+        const meeting = await Meeting.findOne({ _id: req.params.id, companyId: req.companyId });
         if (!meeting) return res.status(404).json({ message: 'Meeting not found' });
 
         // Authorization: Admin or Host can update
@@ -94,8 +94,7 @@ const updateMeeting = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to update this meeting' });
         }
 
-        const updatedMeeting = await Meeting.findByIdAndUpdate(
-            req.params.id,
+        const updatedMeeting = await Meeting.findOneAndUpdate({ _id: req.params.id, companyId: req.companyId },
             req.body,
             { new: true }
         ).populate('host attendees absentees');
@@ -109,7 +108,7 @@ const updateMeeting = async (req, res) => {
 // Delete a meeting
 const deleteMeeting = async (req, res) => {
     try {
-        const meeting = await Meeting.findById(req.params.id);
+        const meeting = await Meeting.findOne({ _id: req.params.id, companyId: req.companyId });
         if (!meeting) return res.status(404).json({ message: 'Meeting not found' });
 
         // Authorization
@@ -120,7 +119,7 @@ const deleteMeeting = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to delete this meeting' });
         }
 
-        await Meeting.findByIdAndDelete(req.params.id);
+        await Meeting.findOneAndDelete({ _id: req.params.id, companyId: req.companyId });
         res.json({ message: 'Meeting deleted successfully' });
     } catch (error) {
         res.status(500).json({ message: error.message });

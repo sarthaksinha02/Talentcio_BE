@@ -11,8 +11,16 @@ const server = http.createServer(app);
 // Setup Socket.IO
 const io = new Server(server, {
     cors: {
-        origin: "*", // Or specific frontend domains in production
-        methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        origin: function (origin, callback) {
+            // Allow all localhost origins including subdomains
+            if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+                callback(null, true);
+            } else {
+                callback(null, "*"); // Fallback for other environments if needed
+            }
+        },
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
@@ -64,10 +72,17 @@ require('./src/models/LeaveRequest');
 require('./src/models/Candidate');
 require('./src/models/InterviewWorkflow');
 require('./src/models/Notification');
+require('./src/models/Company');
+require('./src/models/Plan');
+require('./src/models/ActivityLog');
+require('./src/models/SuperAdminUser');
+require('./src/models/OnboardingEmployee');
 
 // Services
 const syncPermissions = require('./src/services/permissionSync');
 const startEscalationCron = require('./src/services/escalationCron');
+const startAutoCheckoutCron = require('./src/services/attendanceAutoCheckoutCron');
+const cleanupStaleIndexes = require('./src/services/indexCleanup');
 
 // Routes
 const authRoutes = require('./src/routes/authRoutes');
@@ -87,16 +102,35 @@ const helpdeskRoutes = require('./src/routes/helpdeskRoutes');
 const interviewWorkflowRoutes = require('./src/routes/interviewWorkflowRoutes');
 const notificationRoutes = require('./src/routes/notificationRoutes');
 const discussionRoutes = require('./src/routes/discussionRoutes');
+const onboardingRoutes = require('./src/routes/onboardingRoutes');
+
+// Super Admin Routes
+const superAdminAuthRoutes = require('./src/routes/superAdminRoutes');
+const companyRoutes = require('./src/routes/companyRoutes');
+const globalUserRoutes = require('./src/routes/globalUserRoutes');
+const analyticsRoutes = require('./src/routes/analyticsRoutes');
+const planRoutes = require('./src/routes/planRoutes');
+const superAdminMiscRoutes = require('./src/routes/superAdminMiscRoutes');
+
+// Multi-tenant Middleware
+const tenantMiddleware = require('./src/middlewares/tenantMiddleware');
 
 // Database Connection & Init
 const initServer = async () => {
     await connectDB();
+    await cleanupStaleIndexes();
     await syncPermissions();
     startEscalationCron(io); // Start the background Helpdesk escalation job
+    startAutoCheckoutCron(); // Start the background auto-checkout job
 };
 initServer();
 
-// Mount Routes
+// Mount Routes (Tenant-Facing)
+app.use('/api', (req, res, next) => {
+    if (req.path.startsWith('/superadmin')) return next();
+    tenantMiddleware(req, res, next);
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/timesheet', timesheetRoutes);
@@ -114,6 +148,15 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/helpdesk', helpdeskRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/discussions', discussionRoutes);
+app.use('/api/onboarding', onboardingRoutes);
+
+// Super Admin API Namespace
+app.use('/api/superadmin/auth', superAdminAuthRoutes);
+app.use('/api/superadmin/companies', companyRoutes);
+app.use('/api/superadmin/users', globalUserRoutes);
+app.use('/api/superadmin/analytics', analyticsRoutes);
+app.use('/api/superadmin/plans', planRoutes);
+app.use('/api/superadmin', superAdminMiscRoutes);
 
 app.get('/', (req, res) => {
     res.json({ message: 'TalentCio API is running' });

@@ -6,6 +6,11 @@ const taskSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     module: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Module',
@@ -30,5 +35,9 @@ const taskSchema = new mongoose.Schema({
     dueDate: Date,
     estimatedHours: Number
 }, { timestamps: true });
+
+// Performance Indexes
+taskSchema.index({ module: 1, companyId: 1, status: 1 });
+taskSchema.index({ assignees: 1, companyId: 1, status: 1 });
 
 module.exports = mongoose.model('Task', taskSchema);

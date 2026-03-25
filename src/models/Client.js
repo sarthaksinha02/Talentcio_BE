@@ -19,6 +19,11 @@ const clientSchema = new mongoose.Schema({
     email: String,
     phone: String,
     location: String,
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
 
     // Contact Persons (multiple)
     contactPersons: [

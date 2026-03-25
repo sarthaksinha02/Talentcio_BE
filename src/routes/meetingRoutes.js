@@ -1,4 +1,5 @@
 const express = require('express');
+const { requireModule } = require('../middlewares/moduleGuard');
 const router = express.Router();
 const { protect } = require('../middlewares/authMiddleware');
 const {
@@ -11,6 +12,7 @@ const {
 
 // All meeting routes require authentication
 router.use(protect);
+router.use(requireModule('meetingsOfMinutes'));
 
 router.get('/', getMeetings);
 router.get('/:id', getMeetingById);

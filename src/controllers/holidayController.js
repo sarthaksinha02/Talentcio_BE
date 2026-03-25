@@ -8,13 +8,13 @@ exports.getHolidays = async (req, res) => {
         const year = parseInt(req.query.year) || new Date().getFullYear();
         const month = parseInt(req.query.month); // 1-12, optional
 
-        let filter = { year };
+        let filter = { year, companyId: req.companyId };
 
         if (month >= 1 && month <= 12) {
             // Filter to just the requested calendar month
             const start = new Date(year, month - 1, 1);
             const end = new Date(year, month, 1);   // exclusive
-            filter = { date: { $gte: start, $lt: end } };
+            filter = { date: { $gte: start, $lt: end }, companyId: req.companyId };
         }
 
         const holidays = await Holiday.find(filter)
@@ -42,7 +42,8 @@ exports.addHoliday = async (req, res) => {
             name,
             date,
             isOptional,
-            year
+            year,
+            companyId: req.companyId
         });
 
         const holiday = await newHoliday.save();
@@ -60,7 +61,7 @@ exports.updateHoliday = async (req, res) => {
     const { name, date, isOptional } = req.body;
 
     try {
-        let holiday = await Holiday.findById(req.params.id);
+        let holiday = await Holiday.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!holiday) {
             return res.status(404).json({ msg: 'Holiday not found' });
@@ -74,8 +75,7 @@ exports.updateHoliday = async (req, res) => {
         }
         if (isOptional !== undefined) taskFields.isOptional = isOptional;
 
-        holiday = await Holiday.findByIdAndUpdate(
-            req.params.id,
+        holiday = await Holiday.findOneAndUpdate({ _id: req.params.id, companyId: req.companyId },
             { $set: taskFields },
             { new: true }
         );
@@ -92,13 +92,13 @@ exports.updateHoliday = async (req, res) => {
 // @access  Private (Admin only)
 exports.deleteHoliday = async (req, res) => {
     try {
-        let holiday = await Holiday.findById(req.params.id);
+        let holiday = await Holiday.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!holiday) {
             return res.status(404).json({ msg: 'Holiday not found' });
         }
 
-        await Holiday.findByIdAndDelete(req.params.id);
+        await Holiday.findOneAndDelete({ _id: req.params.id, companyId: req.companyId });
 
         res.json({ msg: 'Holiday removed' });
     } catch (err) {

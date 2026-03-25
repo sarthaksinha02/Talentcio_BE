@@ -49,10 +49,16 @@ const timesheetSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
-    rejectionReason: String
+    rejectionReason: String,
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        required: true,
+        index: true
+    }
 }, { timestamps: true });
 
-// Ensure one timesheet per user per month
-timesheetSchema.index({ user: 1, month: 1 }, { unique: true });
+// Ensure one timesheet per user per month per company
+timesheetSchema.index({ user: 1, month: 1, companyId: 1 }, { unique: true });
 
 module.exports = mongoose.model('Timesheet', timesheetSchema);

@@ -4,8 +4,13 @@ const escalationRuleSchema = new mongoose.Schema({
     queryType: {
         type: String,
         enum: ['Payroll Issue', 'Leave Query', 'Benefits Query', 'Policy Query', 'IT Support', 'Other'],
+        required: true
+    },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
         required: true,
-        unique: true
+        index: true
     },
     firstLevelTeam: {
         type: String,
@@ -25,5 +30,7 @@ const escalationRuleSchema = new mongoose.Schema({
         default: 'Admin'
     }
 });
+ 
+escalationRuleSchema.index({ queryType: 1, companyId: 1 }, { unique: true });
 
 module.exports = mongoose.model('EscalationRule', escalationRuleSchema);

@@ -6,6 +6,11 @@ const leaveRequestSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    },
     leaveType: {
         type: String,
         required: true
@@ -64,6 +69,7 @@ const leaveRequestSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Performance Indexes
+leaveRequestSchema.index({ companyId: 1, user: 1, createdAt: -1 });
 leaveRequestSchema.index({ user: 1, createdAt: -1 });
 leaveRequestSchema.index({ status: 1, user: 1 }); // For team approvals (pending status + subordinate ids)
 

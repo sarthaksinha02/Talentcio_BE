@@ -2,6 +2,8 @@ const User = require('../models/User');
 const { HiringRequest } = require('../models/HiringRequest');
 const Candidate = require('../models/Candidate');
 const jwt = require('jsonwebtoken');
+const emailService = require('../services/emailService');
+const crypto = require('crypto');
 
 // Generate JWT Helper
 const generateToken = (id, tokenVersion) => {
@@ -59,7 +61,45 @@ const loginUser = async (req, res) => {
             }
         }).populate('reportingManagers', 'firstName lastName');
 
-        if (user && (await user.matchPassword(password))) {
+        // Check if user exists and password is correct
+        if (!user || !(await user.matchPassword(password))) {
+             return res.status(401).json({ message: 'Invalid email or password' });
+        }
+
+        // Check if user account is active
+        if (user.isActive === false) {
+            return res.status(403).json({ message: 'Your account has been deactivated. Please contact your administrator.' });
+        }
+
+        // Check if password reset is required (First Login)
+        if (user.isPasswordResetRequired) {
+            // Generate 6-digit OTP
+            const otpSize = 6;
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+            console.log(`[AUTH] OTP for ${user.email} (Login): ${otpCode}`);
+            
+            // Set OTP and expiry (10 minutes)
+            user.otp = otpCode;
+            user.otpExpires = Date.now() + 10 * 60 * 1000;
+            await user.save();
+
+            // Send OTP via Email (Non-blocking)
+            emailService.sendOTPEmail(user.email, otpCode, user.firstName).catch(err => {
+                console.error('[AUTH] Background Email Send Error:', err.message);
+            });
+
+            return res.status(200).json({
+                message: 'Password reset required on first login. An OTP has been sent to your email.',
+                passwordResetRequired: true,
+                email: user.email,
+                userId: user._id
+            });
+        }
+
+        // Multi-tenant check: If a tenant is identified by middleware, user must belong to it
+        if (req.companyId && user.companyId && user.companyId.toString() !== req.companyId.toString()) {
+            return res.status(401).json({ message: `Your account does not belong to the '${req.company?.name || 'requested'}' workspace.` });
+        }
             let permissions = [...new Set(
                 user.roles.flatMap(role => (role.permissions || []).filter(p => p).map(p => p.key))
             )];
@@ -116,6 +156,8 @@ const loginUser = async (req, res) => {
                 isInterviewer = interviewCount > 0;
             }
 
+            const company = await require('../models/Company').findById(user.companyId);
+
             res.json({
                 _id: user._id,
                 firstName: user.firstName,
@@ -128,11 +170,9 @@ const loginUser = async (req, res) => {
                 hasAllPermissions: hasAllPermissions,
                 directReportsCount: directReportsCount,
                 isTAParticipant: taCount > 0 || isInterviewer,
+                company: company, // Full configuration for the frontend
                 token: generateToken(user._id, user.tokenVersion)
-            });
-        } else {
-            res.status(401).json({ message: 'Invalid email or password' });
-        }
+        });
     } catch (error) {
         console.error('LOGIN ERROR:', error);
         res.status(500).json({ message: 'Server Error', error: error.message });
@@ -167,8 +207,79 @@ const uploadProfilePicture = async (req, res) => {
     }
 };
 
+// @desc    Verify OTP and Reset Password
+// @route   POST /api/auth/verify-otp-reset
+// @access  Public
+const verifyOtpAndResetPassword = async (req, res) => {
+    const { email, otp, newPassword } = req.body;
+
+    try {
+        const user = await User.findOne({ 
+            email, 
+            otp, 
+            otpExpires: { $gt: Date.now() } 
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid or expired OTP' });
+        }
+
+        // Update password and clear OTP
+        user.password = newPassword;
+        user.isPasswordResetRequired = false;
+        user.otp = null;
+        user.otpExpires = null;
+        user.tokenVersion = (user.tokenVersion || 0) + 1; // Invalidate old tokens if any
+        
+        await user.save();
+
+        res.json({ 
+            message: 'Password reset successfully. You can now login with your new password.',
+            success: true
+        });
+    } catch (error) {
+        console.error('OTP VERIFY ERROR:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
+// @desc    Resend OTP
+// @route   POST /api/auth/resend-otp
+// @access  Public
+const resendOtp = async (req, res) => {
+    const { email } = req.body;
+
+    try {
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Generate new 6-digit OTP
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        console.log(`[AUTH] OTP for ${user.email} (Resend): ${otpCode}`);
+        
+        user.otp = otpCode;
+        user.otpExpires = Date.now() + 10 * 60 * 1000;
+        await user.save();
+
+        const emailSent = await emailService.sendOTPEmail(user.email, otpCode, user.firstName);
+
+        res.json({ 
+            message: 'A new OTP has been sent to your email.',
+            emailSent: emailSent
+        });
+    } catch (error) {
+        console.error('RESEND OTP ERROR:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
+    }
+};
+
 module.exports = {
     register,
     loginUser,
-    uploadProfilePicture
+    uploadProfilePicture,
+    verifyOtpAndResetPassword,
+    resendOtp
 };

@@ -7,10 +7,12 @@ const Project = require('../models/Project');
 // @access  Private
 const getDashboardStats = async (req, res) => {
     try {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
+        const now = new Date();
+        const istString = now.toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' });
+        const today = new Date(istString);
+        const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+
+
 
         // Run all independent DB queries in parallel
         const [
@@ -21,20 +23,23 @@ const getDashboardStats = async (req, res) => {
             todaysAttendance,
             allProjects
         ] = await Promise.all([
-            User.countDocuments({ isActive: true }),
+            User.countDocuments({ isActive: true, companyId: req.companyId }),
             Attendance.countDocuments({
+                companyId: req.companyId,
                 date: { $gte: today, $lt: tomorrow },
                 status: { $in: ['PRESENT', 'HALF_DAY'] }
             }),
-            Attendance.countDocuments({ approvalStatus: 'PENDING' }),
-            User.find({ isActive: true })
+            Attendance.countDocuments({ approvalStatus: 'PENDING', companyId: req.companyId }),
+            User.find({ isActive: true, companyId: req.companyId })
                 .select('firstName lastName employmentType roles')
                 .populate('roles', 'name')
                 .lean(),
-            Attendance.find({ date: { $gte: today, $lt: tomorrow } })
+            Attendance.find({
+                companyId: req.companyId,
+                date: { $gte: today, $lt: tomorrow } })
                 .select('user status clockIn clockOut location clockOutLocation')
                 .lean(),
-            Project.find({})
+            Project.find({ companyId: req.companyId })
                 .sort({ updatedAt: -1 })
                 .limit(10)
                 .select('name isActive status dueDate')

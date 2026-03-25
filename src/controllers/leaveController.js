@@ -7,7 +7,7 @@ const NotificationService = require('../services/notificationService');
 
 
 // Helper to initialize balance dynamically based on policy
-const initializeBalance = async (userId, policy, year) => {
+const initializeBalance = async (userId, policy, year, companyId) => {
     let initialAccrued = 0;
 
     if (policy.accrualType === 'Yearly') {
@@ -31,7 +31,8 @@ const initializeBalance = async (userId, policy, year) => {
         accrued: initialAccrued,
         utilized: 0,
         encashed: 0,
-        closingBalance: initialAccrued
+        closingBalance: initialAccrued,
+        companyId: companyId || policy.companyId
     });
 };
 
@@ -43,8 +44,12 @@ const applyLeave = async (req, res) => {
     const userId = req.user._id;
 
     try {
+        console.log(`[LeaveApply] company: ${req.companyId}, user: ${userId}`);
+        
+        if (!req.companyId) return res.status(400).json({ message: 'Tenant context missing' });
+
         // 1. Fetch Policy
-        const policy = await LeaveConfig.findOne({ leaveType, isActive: true });
+        const policy = await LeaveConfig.findOne({ leaveType, isActive: true, companyId: req.companyId });
         if (!policy) {
             return res.status(400).json({ message: 'Invalid or inactive leave type' });
         }
@@ -67,6 +72,7 @@ const applyLeave = async (req, res) => {
         const reqEnd = new Date(endDate);
         const overlapping = await LeaveRequest.findOne({
             user: userId,
+            companyId: req.companyId,
             status: { $in: ['Pending', 'Approved'] },
             // Two ranges overlap when: existingStart <= reqEnd AND existingEnd >= reqStart
             startDate: { $lte: reqEnd },
@@ -98,11 +104,11 @@ const applyLeave = async (req, res) => {
 
         // 5. Check Balance
         const currentYear = new Date().getFullYear();
-        let balance = await LeaveBalance.findOne({ user: userId, leaveType, year: currentYear });
+        let balance = await LeaveBalance.findOne({ user: userId, leaveType, year: currentYear, companyId: req.companyId });
 
         // Auto-create balance if missing
         if (!balance) {
-            balance = await initializeBalance(userId, policy, currentYear);
+            balance = await initializeBalance(userId, policy, currentYear, req.companyId);
         }
 
         // Calculate Available
@@ -127,6 +133,7 @@ const applyLeave = async (req, res) => {
         // 7. Create Request
         const leaveRequest = await LeaveRequest.create({
             user: userId,
+            companyId: req.companyId,
             leaveType,
 
             startDate,
@@ -157,8 +164,8 @@ const applyLeave = async (req, res) => {
         res.status(201).json(leaveRequest);
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveApply Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -172,13 +179,13 @@ const getMyLeaves = async (req, res) => {
         const skip = (page - 1) * limit;
 
         const [leaves, total] = await Promise.all([
-            LeaveRequest.find({ user: req.user._id })
+            LeaveRequest.find({ user: req.user._id, companyId: req.companyId })
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .select('leaveType startDate endDate isHalfDay reason status createdAt daysCount')
                 .lean(),
-            LeaveRequest.countDocuments({ user: req.user._id })
+            LeaveRequest.countDocuments({ user: req.user._id, companyId: req.companyId })
         ]);
 
         res.json({
@@ -191,8 +198,8 @@ const getMyLeaves = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveRequests Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -202,9 +209,12 @@ const getMyLeaves = async (req, res) => {
 const getMyBalances = async (req, res) => {
     try {
         const year = new Date().getFullYear();
+        
+        console.log(`[LeaveBalance] GET for company: ${req.companyId}, user: ${req.user._id}`);
+        if (!req.companyId) return res.status(400).json({ message: 'Tenant context missing' });
 
         // Start by getting all active policies
-        const allPolicies = await LeaveConfig.find({ isActive: true }).lean();
+        const allPolicies = await LeaveConfig.find({ isActive: true, companyId: req.companyId }).lean();
 
         // Filter policies based on user employment type (Strict Check)
         const userEmploymentType = req.user.employmentType || 'Full Time';
@@ -215,32 +225,42 @@ const getMyBalances = async (req, res) => {
         );
 
         const balances = [];
+        
+        // Batch fetch all existing balances for this user/year
+        const existingBalances = await LeaveBalance.find({ 
+            user: req.user._id, 
+            year, 
+            companyId: req.companyId 
+        }).lean();
 
-        for (const policy of policies) {
-            let balance = await LeaveBalance.findOne({ user: req.user._id, leaveType: policy.leaveType, year }).lean();
+        // Map for quick lookup
+        const balanceMap = new Map(existingBalances.map(b => [b.leaveType, b]));
 
-            // If no balance record, initialize it based on the policy rules
+        // Process all policies in parallel
+        const results = await Promise.all(policies.map(async (policy) => {
+            let balance = balanceMap.get(policy.leaveType);
+
             if (!balance) {
-                const newBalance = await initializeBalance(req.user._id, policy, year);
-                balance = newBalance.toObject();
+                // Initialize missing balance
+                const newB = await initializeBalance(req.user._id, policy, year, req.companyId);
+                balance = newB.toObject();
             } else {
-                // Calculate virtual closing
-                balance.closingBalance = balance.openingBalance + balance.accrued - balance.utilized;
+                balance.closingBalance = (balance.openingBalance || 0) + (balance.accrued || 0) - (balance.utilized || 0);
             }
 
-            balances.push({
+            return {
                 ...balance,
                 policyName: policy.name,
                 policyDescription: policy.description,
-                policyAccrualAmount: policy.accrualAmount, // Pass down to frontend for checking Unlimited (0)
+                policyAccrualAmount: policy.accrualAmount,
                 proofRequiredAbove: policy.proofRequiredAbove
-            });
-        }
+            };
+        }));
 
-        res.json(balances);
+        res.json(results);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveBalance Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -253,11 +273,11 @@ const getManagerApprovals = async (req, res) => {
             (typeof r === 'string' ? r : r.name) === 'Admin'
         );
 
-        let query = { status: 'Pending' };
+        let query = { status: 'Pending', companyId: req.companyId };
 
         if (!isAdmin) {
             // Managers only see their direct reports' requests
-            const subordinates = await User.find({ reportingManagers: req.user._id }).select('_id');
+            const subordinates = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
             const subordinateIds = subordinates.map(u => u._id);
 
             if (subordinateIds.length === 0) {
@@ -275,8 +295,8 @@ const getManagerApprovals = async (req, res) => {
 
         res.json(requests);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveApprovals Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -289,13 +309,13 @@ const updateLeaveStatus = async (req, res) => {
     const managerId = req.user._id;
 
     try {
-        const request = await LeaveRequest.findById(requestId);
+        const request = await LeaveRequest.findOne({ _id: requestId, companyId: req.companyId });
         if (!request) {
             return res.status(404).json({ message: 'Request not found' });
         }
 
         // Verify Authority: must be a direct reporting manager OR have an admin role
-        const employee = await User.findById(request.user);
+        const employee = await User.findOne({ _id: request.user, companyId: req.companyId });
         if (!employee) {
             return res.status(404).json({ message: 'Employee not found' });
         }
@@ -316,7 +336,7 @@ const updateLeaveStatus = async (req, res) => {
         if (status === 'Approved') {
             // Update Balance
             const currentYear = new Date().getFullYear();
-            let balance = await LeaveBalance.findOne({ user: request.user, leaveType: request.leaveType, year: currentYear });
+            let balance = await LeaveBalance.findOne({ user: request.user, leaveType: request.leaveType, year: currentYear, companyId: req.companyId });
 
             // If balance check wasn't strict during apply (wait state), re-check here? 
             // We checked during apply. But let's assume valid.
@@ -325,7 +345,7 @@ const updateLeaveStatus = async (req, res) => {
 
             if (!balance) {
                 // Should exist if applied, but safe
-                balance = await LeaveBalance.create({ user: request.user, leaveType: request.leaveType, year: currentYear });
+                balance = await LeaveBalance.create({ user: request.user, leaveType: request.leaveType, year: currentYear, companyId: req.companyId });
             }
 
             balance.utilized += request.daysCount;
@@ -343,7 +363,7 @@ const updateLeaveStatus = async (req, res) => {
         });
 
         await request.save();
-        
+
         // Notify Employee
         const io = req.app.get('io');
         await NotificationService.createNotification(io, {
@@ -357,8 +377,8 @@ const updateLeaveStatus = async (req, res) => {
         res.json(request);
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveUpdateStatus Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 
@@ -370,15 +390,10 @@ const cancelLeave = async (req, res) => {
     const userId = req.user._id;
 
     try {
-        const request = await LeaveRequest.findById(requestId);
+        const request = await LeaveRequest.findOne({ _id: requestId, user: userId, companyId: req.companyId });
 
         if (!request) {
             return res.status(404).json({ message: 'Request not found' });
-        }
-
-        // Only the owner can cancel their own request
-        if (request.user.toString() !== userId.toString()) {
-            return res.status(403).json({ message: 'Not authorized to cancel this request' });
         }
 
         if (request.status !== 'Pending') {
@@ -396,8 +411,8 @@ const cancelLeave = async (req, res) => {
         res.json({ message: 'Leave request cancelled successfully', request });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        console.error('[LeaveCancel Error]', error);
+        res.status(500).json({ message: 'Server Error', details: error.message });
     }
 };
 

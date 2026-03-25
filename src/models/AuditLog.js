@@ -16,7 +16,12 @@ const auditLogSchema = new mongoose.Schema({
     details: {
         type: mongoose.Schema.Types.Mixed
     },
-    ipAddress: String
+    ipAddress: String,
+    companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        index: true
+    }
 }, { timestamps: true });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

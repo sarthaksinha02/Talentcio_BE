@@ -1,10 +1,14 @@
 const express = require('express');
+const { requireModule } = require('../middlewares/moduleGuard');
 const router = express.Router();
+// Note: requireModule added after protect middleware
 const candidateController = require('../controllers/candidateController');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/authorize');
 const { upload } = require('../config/cloudinary');
 
+router.use(protect);
+router.use(requireModule('talentAcquisition'));
 // Base path: /api/ta/candidates
 
 // Upload resume

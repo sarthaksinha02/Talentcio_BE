@@ -23,11 +23,36 @@ const protect = async (req, res, next) => {
                     populate: {
                         path: 'permissions'
                     }
-                }).populate('reportingManagers', 'firstName lastName');
+                }).populate('reportingManagers', 'firstName lastName')
+                .lean();
+            
+            if (req.user && req.user.roles) {
+                req.user.permissions = [...new Set(
+                    req.user.roles.flatMap(role => 
+                        (role.permissions || []).map(p => typeof p === 'object' ? p.key : p)
+                    )
+                )];
+            }
 
             // Ensure roles is always an array
             if (req.user && !req.user.roles) {
                 req.user.roles = [];
+            }
+
+            // --- Multi-tenant isolation check ---
+            // 1. If a tenant workspace is identified by URL (req.companyId), the user MUST belong to it.
+            if (req.companyId) {
+                if (req.user.companyId && req.user.companyId.toString() !== req.companyId.toString()) {
+                    console.warn(`[SECURITY ALERT] User ${req.user.email} attempted cross-tenant access from workspace ${req.company?.name || req.companyId} while belonging to ${req.user.companyId}`);
+                    return res.status(403).json({ 
+                        message: `Your account does not belong to the '${req.company?.name || 'requested'}' workspace.`,
+                        code: 'TENANT_MISMATCH'
+                    });
+                }
+            } 
+            // 2. If NO tenant workspace is identified (localhost, main domain), fallback to user's company
+            else if (req.user.companyId) {
+                req.companyId = req.user.companyId;
             }
 
             if (!req.user) {
@@ -56,10 +81,20 @@ const protect = async (req, res, next) => {
 };
 
 const admin = (req, res, next) => {
-    if (req.user && req.user.roles && req.user.roles.some(role => role.name === 'Admin' || role === 'Admin' || (typeof role === 'object' && role.name === 'Admin'))) {
+    const isAdminRole = req.user && req.user.roles && req.user.roles.some(role => 
+        role.name === 'Admin' || role === 'Admin' || (typeof role === 'object' && role.name === 'Admin')
+    );
+    
+    const hasAdminPermission = req.user && req.user.permissions && (
+        req.user.permissions.includes('*') || 
+        req.user.permissions.includes('all') ||
+        req.user.permissions.includes('admin')
+    );
+
+    if (isAdminRole || hasAdminPermission) {
         next();
     } else {
-        res.status(403).json({ message: 'Not authorized as an admin' });
+        res.status(403).json({ message: 'Not authorized as an admin (Role or Permission missing)' });
     }
 };
 
