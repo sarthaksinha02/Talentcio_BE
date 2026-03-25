@@ -35,11 +35,9 @@ const getCurrentTimesheet = async (req, res) => {
             });
         }
 
-        // Populate User and Supervisor
-        let fullUser = null;
         try {
             fullUser = await User.findById(req.user._id)
-                .select('firstName lastName email employeeCode')
+                .select('firstName lastName email employeeCode joiningDate')
                 .populate('reportingManagers', 'firstName lastName email')
                 .lean();
         } catch (err) {
@@ -89,9 +87,11 @@ const getCurrentTimesheet = async (req, res) => {
                 date: { $gte: start, $lte: end }
             }).populate({
                 path: 'task',
+                select: 'name module',
                 populate: {
                     path: 'module',
-                    populate: { path: 'project' }
+                    select: 'name project',
+                    populate: { path: 'project', select: 'name client' }
                 }
             }).sort({ date: 1 }).lean(),
             Attendance.find({
@@ -508,11 +508,13 @@ const getPendingTimesheets = async (req, res) => {
                 date: { $gte: start, $lte: end }
             }).populate({
                 path: 'task',
+                select: 'name module',
                 populate: {
                     path: 'module',
-                    populate: { path: 'project' }
+                    select: 'name project',
+                    populate: { path: 'project', select: 'name' }
                 }
-            }).sort({ date: 1 });
+            }).sort({ date: 1 }).lean();
 
             const entries = workLogs.map(log => ({
                 _id: log._id,
@@ -528,7 +530,7 @@ const getPendingTimesheets = async (req, res) => {
             }));
 
             return {
-                ...ts.toObject(),
+                ...(ts.toObject ? ts.toObject() : ts),
                 entries
             };
         }));

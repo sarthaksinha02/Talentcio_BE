@@ -234,7 +234,11 @@ exports.getAttendanceByMonth = async (req, res) => {
             end.setMonth(end.getMonth() + 1);
             query.date = { $gte: start, $lt: end };
         }
-        const history = await Attendance.find(query).populate('user', 'firstName lastName').sort({ date: -1 }).lean();
+        const history = await Attendance.find(query)
+            .select('date clockIn clockInIST clockOut clockOutIST duration status user')
+            .populate('user', 'firstName lastName')
+            .sort({ date: -1 })
+            .lean();
         res.json(history);
     } catch (error) {
         console.error(error);

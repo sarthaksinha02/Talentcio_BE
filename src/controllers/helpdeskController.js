@@ -8,7 +8,7 @@ const NotificationService = require('../services/notificationService');
 
 exports.getQueryTypes = async (req, res) => {
     try {
-        const types = await QueryType.find()
+        const types = await QueryType.find({ companyId: req.companyId })
             .populate('assignedRole', 'name')
             .populate('assignedPerson', 'firstName lastName email')
             .populate('escalationRole', 'name')
@@ -33,7 +33,8 @@ exports.addQueryType = async (req, res) => {
 
         const newType = new QueryType({
             name, assignedRole, assignedPerson,
-            enableEscalation, escalationDays, escalationRole, escalationPerson
+            enableEscalation, escalationDays, escalationRole, escalationPerson,
+            companyId: req.companyId
         });
         await newType.save();
 
@@ -52,7 +53,7 @@ exports.updateQueryType = async (req, res) => {
             name, assignedRole, assignedPerson, isActive,
             enableEscalation, escalationDays, escalationRole, escalationPerson
         } = req.body;
-        const type = await QueryType.findById(req.params.id);
+        const type = await QueryType.findOne({ _id: req.params.id, companyId: req.companyId });
 
         if (!type) return res.status(404).json({ success: false, message: 'Type not found' });
 
@@ -77,7 +78,7 @@ exports.deleteQueryType = async (req, res) => {
     try {
         if (!req.user.roles.some(r => r.name === 'Admin')) return res.status(403).json({ success: false, message: 'Admins only' });
 
-        await QueryType.findByIdAndDelete(req.params.id);
+        await QueryType.findOneAndDelete({ _id: req.params.id, companyId: req.companyId });
         res.status(200).json({ success: true, message: 'Type deleted' });
     } catch (error) {
         console.error('Error deleting query type:', error);
@@ -92,7 +93,7 @@ exports.createQuery = async (req, res) => {
     try {
         const { subject, description, queryTypeId, priority } = req.body;
 
-        const qType = await QueryType.findById(queryTypeId);
+        const qType = await QueryType.findOne({ _id: queryTypeId, companyId: req.companyId });
         if (!qType || !qType.isActive) return res.status(400).json({ success: false, message: 'Invalid or inactive query type.' });
 
         const newQuery = new HelpdeskQuery({
@@ -102,7 +103,8 @@ exports.createQuery = async (req, res) => {
             priority: priority || 'Medium',
             raisedBy: req.user._id,
             assignedTo: qType.assignedPerson,
-            status: 'New'
+            status: 'New',
+            companyId: req.companyId
         });
 
         await newQuery.save();
@@ -131,7 +133,7 @@ exports.createQuery = async (req, res) => {
 
 exports.getMyQueries = async (req, res) => {
     try {
-        const queries = await HelpdeskQuery.find({ raisedBy: req.user._id })
+        const queries = await HelpdeskQuery.find({ raisedBy: req.user._id, companyId: req.companyId })
             .populate('queryType', 'name')
             .populate('assignedTo', 'firstName lastName email')
             .sort({ createdAt: -1 })
@@ -146,7 +148,7 @@ exports.getMyQueries = async (req, res) => {
 
 exports.getAssignedQueries = async (req, res) => {
     try {
-        const queries = await HelpdeskQuery.find({ assignedTo: req.user._id })
+        const queries = await HelpdeskQuery.find({ assignedTo: req.user._id, companyId: req.companyId })
             .populate('raisedBy', 'firstName lastName email')
             .populate('queryType', 'name')
             .sort({ priority: -1, createdAt: 1 }) // High priority first, then oldest
@@ -164,7 +166,7 @@ exports.getAllQueries = async (req, res) => {
         const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
         if (!isAdmin) return res.status(403).json({ success: false, message: 'Admins only' });
 
-        const queries = await HelpdeskQuery.find()
+        const queries = await HelpdeskQuery.find({ companyId: req.companyId })
             .populate('raisedBy', 'firstName lastName email')
             .populate('assignedTo', 'firstName lastName email')
             .populate('queryType', 'name')
@@ -183,7 +185,7 @@ exports.getEscalatedQueries = async (req, res) => {
         const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
         if (!isAdmin) return res.status(403).json({ success: false, message: 'Admins only' });
 
-        const queries = await HelpdeskQuery.find({ status: 'Escalated' })
+        const queries = await HelpdeskQuery.find({ status: 'Escalated', companyId: req.companyId })
             .populate('raisedBy', 'firstName lastName email')
             .populate('assignedTo', 'firstName lastName email')
             .populate('queryType', 'name')
@@ -206,7 +208,7 @@ exports.getQueryById = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Invalid Query ID format' });
         }
 
-        const query = await HelpdeskQuery.findById(id)
+        const query = await HelpdeskQuery.findOne({ _id: id, companyId: req.companyId })
             .populate('raisedBy', 'firstName lastName email')
             .populate('assignedTo', 'firstName lastName email')
             .populate('comments.user', 'firstName lastName roles')
