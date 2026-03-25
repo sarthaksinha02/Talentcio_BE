@@ -89,10 +89,18 @@ const applyLeave = async (req, res) => {
         // 4. Calculate Days
         let daysCount = 0;
         if (isHalfDay) {
-            daysCount = 0.5;
             // Validate Half Day is same date
             if (new Date(startDate).toDateString() !== new Date(endDate).toDateString()) {
                 return res.status(400).json({ message: 'Half day leave must be on a single date' });
+            }
+            
+            // Check if this date is a holiday or weekend
+            const holidayCheck = await calculateLeaveDays(new Date(startDate), new Date(endDate), policy);
+            if (holidayCheck === 0) {
+                // It's a holiday/weekend and sandwich rule is OFF
+                daysCount = 0;
+            } else {
+                daysCount = 0.5;
             }
         } else {
             daysCount = await calculateLeaveDays(new Date(startDate), new Date(endDate), policy);
@@ -178,18 +186,26 @@ const getMyLeaves = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        const [leaves, total] = await Promise.all([
+        const [leaves, total, configs] = await Promise.all([
             LeaveRequest.find({ user: req.user._id, companyId: req.companyId })
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .select('leaveType startDate endDate isHalfDay reason status createdAt daysCount')
                 .lean(),
-            LeaveRequest.countDocuments({ user: req.user._id, companyId: req.companyId })
+            LeaveRequest.countDocuments({ user: req.user._id, companyId: req.companyId }),
+            LeaveConfig.find({ companyId: req.companyId }).select('leaveType sandwichRule').lean()
         ]);
 
+        const sandwichMap = configs.reduce((acc, c) => ({ ...acc, [c.leaveType]: c.sandwichRule }), {});
+
+        const enrichedLeaves = leaves.map(l => ({
+            ...l,
+            sandwichRule: sandwichMap[l.leaveType] || false
+        }));
+
         res.json({
-            data: leaves,
+            data: enrichedLeaves,
             pagination: {
                 page,
                 limit,
@@ -273,7 +289,16 @@ const getManagerApprovals = async (req, res) => {
             (typeof r === 'string' ? r : r.name) === 'Admin'
         );
 
-        let query = { status: 'Pending', companyId: req.companyId };
+        const { status } = req.query;
+        let query = { companyId: req.companyId };
+        
+        if (status && status !== 'All') {
+            query.status = status;
+        } else if (!status) {
+            // Default to Pending if no status specified
+            query.status = 'Pending';
+        }
+        // If status is 'All', we don't add a status filter to the query
 
         if (!isAdmin) {
             // Managers only see their direct reports' requests
@@ -287,13 +312,23 @@ const getManagerApprovals = async (req, res) => {
         }
         // Admins: no user filter — see all pending requests across the org
 
-        const requests = await LeaveRequest.find(query)
-            .populate('user', 'firstName lastName email employeeCode')
-            .sort({ createdAt: 1 })
-            .select('user leaveType startDate endDate daysCount reason status isHalfDay createdAt')
-            .lean();
+        const [requests, configs] = await Promise.all([
+            LeaveRequest.find(query)
+                .populate('user', 'firstName lastName email employeeCode')
+                .sort({ createdAt: 1 })
+                .select('user leaveType startDate endDate daysCount reason status isHalfDay createdAt')
+                .lean(),
+            LeaveConfig.find({ companyId: req.companyId }).select('leaveType sandwichRule').lean()
+        ]);
 
-        res.json(requests);
+        const sandwichMap = configs.reduce((acc, c) => ({ ...acc, [c.leaveType]: c.sandwichRule }), {});
+
+        const enrichedRequests = requests.map(r => ({
+            ...r,
+            sandwichRule: sandwichMap[r.leaveType] || false
+        }));
+
+        res.json(enrichedRequests);
     } catch (error) {
         console.error('[LeaveApprovals Error]', error);
         res.status(500).json({ message: 'Server Error', details: error.message });
