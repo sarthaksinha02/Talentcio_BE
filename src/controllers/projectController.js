@@ -404,7 +404,27 @@ const getModules = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to view modules for this project' });
         }
 
-        const modules = await Module.find({ project: projectId, companyId: req.companyId });
+        const { userId: queryUserId } = req.query;
+        const query = { project: projectId, companyId: req.companyId };
+
+        // Target user for restriction check: queryUserId (from Timesheet.jsx) or current user (if not Admin)
+        // If queryUserId is provided (which it will be from Timesheet.jsx), apply strict restriction.
+        const targetUserId = queryUserId;
+
+        if (targetUserId) {
+            // Check if user is Project Manager or Member
+            const isProjectAssigned = project.manager?.toString() === targetUserId.toString() ||
+                project.members?.some(m => m.toString() === targetUserId.toString());
+
+            if (!isProjectAssigned) {
+                // Filter modules where the user has assigned tasks
+                const tasksOfUser = await Task.find({ assignees: targetUserId, companyId: req.companyId }).select('module');
+                const userModuleIds = tasksOfUser.map(t => t.module);
+                query._id = { $in: userModuleIds };
+            }
+        }
+
+        const modules = await Module.find(query);
         res.json(modules);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -459,30 +479,37 @@ const getTasks = async (req, res) => {
         if (req.query.moduleId) query.module = req.query.moduleId;
         if (req.query.assignees) query.assignees = req.query.assignees; // Check assignees array
 
-        // Security: Check permissions
-        const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
-            req.user.roles.some(r => r.permissions.some(p => p.key === 'task.read'));
+        const { userId: queryUserId } = req.query;
 
-        if (!canViewAll) {
-            // If not admin/global reader, restrict.
-            // If querying by module, check project access
+        // Restriction target
+        const targetUserId = queryUserId;
+
+        if (targetUserId) {
+            // Check if user has Project-level access
+            let isProjectAssigned = false;
+            
+            // If moduleId is provided, check its project
             if (req.query.moduleId) {
-                const module = await Module.findOne({ _id: req.query.moduleId, companyId: req.companyId }).populate('project');
+                const module = await Module.findById(req.query.moduleId).populate('project');
                 if (module && module.project) {
                     const project = module.project;
-                    const isManager = project.manager?.toString() === req.user._id.toString();
-                    const isMember = project.members?.some(m => m.toString() === req.user._id.toString());
-
-                    if (!isManager && !isMember) {
-                        // Restrict to assigned tasks only
-                        query.assignees = req.user._id;
-                    }
-                } else {
-                    // Module not found or no project, restrict to assigned
-                    query.assignees = req.user._id;
+                    isProjectAssigned = project.manager?.toString() === targetUserId.toString() ||
+                        project.members?.some(m => m.toString() === targetUserId.toString());
                 }
-            } else {
-                // No module filter, restrict to assigned tasks
+            }
+
+            if (!isProjectAssigned) {
+                // Explicitly filter by assignee for timesheet/other views
+                query.assignees = targetUserId;
+            }
+        } else {
+            // If no userId passed, and user is NOT admin, restrict to self
+            const isAdmin = req.user.roles?.some(r => 
+                (typeof r === 'string' && r === 'Admin') || 
+                (typeof r === 'object' && r.name === 'Admin')
+            ) || req.user.permissions?.includes('*');
+
+            if (!isAdmin) {
                 query.assignees = req.user._id;
             }
         }

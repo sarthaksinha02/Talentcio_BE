@@ -4,6 +4,8 @@ const User = require('../models/User');
 const Attendance = require('../models/Attendance');
 const { startOfMonth, endOfMonth, startOfWeek, endOfWeek, format, startOfDay, endOfDay, addWeeks, subWeeks } = require('date-fns');
 const WorkLog = require('../models/WorkLog');
+const Task = require('../models/Task');
+const Module = require('../models/Module');
 
 // @desc    Get Current Month Timesheet
 // @route   GET /api/timesheet/current
@@ -281,7 +283,50 @@ const submitTimesheet = async (req, res) => {
 // @access  Private
 const getProjects = async (req, res) => {
     try {
-        const projects = await Project.find({ companyId: req.companyId, isActive: true }).lean();
+        const { userId } = req.query;
+        let targetUserId = req.user._id;
+
+        // Check Permissions for viewing other's projects
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.view');
+
+        if (userId && (isAdmin || userId === req.user._id.toString())) {
+            targetUserId = userId;
+        }
+
+        // If Admin AND NO userId query, show all active projects (for Project Management / General view)
+        // BUT if userId query exists, we stick to the restriction logic below.
+        if (isAdmin && !userId) {
+            const projects = await Project.find({ companyId: req.companyId, isActive: true }).lean();
+            return res.json(projects);
+        }
+
+        // For regular users (or when viewing a specific user):
+        // Find projects where the user is:
+        // 1. Manager
+        // 2. Member
+        // 3. Assigned to a task within the project
+
+        // Get Task IDs assigned to the user
+        const assignedTasks = await Task.find({ assignees: targetUserId, companyId: req.companyId }).select('module');
+        const moduleIds = [...new Set(assignedTasks.map(t => t.module))];
+
+        // Get Project IDs for those modules
+        const modules = await Module.find({ _id: { $in: moduleIds } }).select('project');
+        const taskProjectIds = [...new Set(modules.map(m => m.project))];
+
+        const projects = await Project.find({
+            companyId: req.companyId,
+            isActive: true,
+            $or: [
+                { manager: targetUserId },
+                { members: targetUserId },
+                { _id: { $in: taskProjectIds } }
+            ]
+        }).lean();
+
         res.json(projects);
     } catch (error) {
         console.error(error);
