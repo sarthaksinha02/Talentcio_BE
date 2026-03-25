@@ -23,6 +23,11 @@ const discussionSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    supervisor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    },
     companyId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Company',
