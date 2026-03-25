@@ -8,7 +8,13 @@ const NotificationService = require('../services/notificationService');
 
 exports.getQueryTypes = async (req, res) => {
     try {
-        const types = await QueryType.find({ companyId: req.companyId })
+        const types = await QueryType.find({ 
+            $or: [
+                { companyId: req.companyId },
+                { companyId: { $exists: false } },
+                { companyId: null }
+            ]
+        })
             .populate('assignedRole', 'name')
             .populate('assignedPerson', 'firstName lastName email')
             .populate('escalationRole', 'name')
