@@ -139,7 +139,9 @@ const addEntry = async (req, res) => {
         const isAdmin = req.user.roles?.some(r => 
             (typeof r === 'string' && r === 'Admin') || 
             (typeof r === 'object' && r.name === 'Admin')
-        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.create');
+        ) || req.user.permissions?.includes('*') || 
+          req.user.permissions?.includes('timesheet.create') ||
+          req.user.permissions?.includes('timesheet.update_others');
 
         if (userId && isAdmin) {
             targetUserId = userId;
@@ -373,6 +375,7 @@ const getUserTimesheet = async (req, res) => {
             (typeof r === 'object' && r.name === 'Admin')
         ) || req.user.permissions?.includes('*') || 
              req.user.permissions?.includes('timesheet.view') ||
+             req.user.permissions?.includes('timesheet.update_others') ||
              req.user.permissions?.includes('attendance.view');
 
         const isManager = targetUser.reportingManagers?.some(m => m.toString() === req.user._id.toString());
@@ -626,7 +629,9 @@ const updateEntry = async (req, res) => {
         const isAdmin = requestor.roles?.some(r => 
             (typeof r === 'string' && r === 'Admin') || 
             (typeof r === 'object' && r.name === 'Admin')
-        ) || requestor.permissions?.includes('*') || requestor.permissions?.includes('timesheet.update');
+        ) || requestor.permissions?.includes('*') || 
+          requestor.permissions?.includes('timesheet.update') ||
+          requestor.permissions?.includes('timesheet.update_others');
 
         if (!isOwner && !isManager && !isAdmin) {
             return res.status(403).json({ message: 'Not authorized' });

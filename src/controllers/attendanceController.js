@@ -204,13 +204,27 @@ exports.getAttendanceByMonth = async (req, res) => {
     try {
         const { month, year, userId } = req.query;
         let query = { companyId: req.companyId };
-        if (userId) query.user = userId;
-        else query.user = req.user._id;
+        
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || 
+          req.user.permissions?.includes('attendance.view') ||
+          req.user.permissions?.includes('attendance.update_others');
 
-        // Support both ?month=YYYY-MM and ?year=YYYY&month=M (frontend sends year+month separately)
+        if (userId) {
+            const isManager = (await User.findById(userId))?.reportingManagers?.some(m => m.toString() === req.user._id.toString());
+            if (!isAdmin && !isManager && userId !== req.user._id.toString()) {
+                return res.status(403).json({ message: 'Not authorized to view this user\'s attendance' });
+            }
+            query.user = userId;
+        } else {
+            query.user = req.user._id;
+        }
+
+        // Support both ?month=YYYY-MM and ?year=YYYY&month=M
         let resolvedMonth = month;
         if (year && month && !month.includes('-')) {
-            // Pad month to 2 digits and combine: e.g. year=2026, month=3 → "2026-03"
             resolvedMonth = `${year}-${String(month).padStart(2, '0')}`;
         }
 
@@ -231,9 +245,22 @@ exports.getAttendanceByMonth = async (req, res) => {
 exports.updateAttendance = async (req, res) => {
     const { clockIn, clockOut } = req.body;
     try {
-        const attendance = await Attendance.findOne({ _id: req.params.id, companyId: req.companyId });
+        const attendance = await Attendance.findOne({ _id: req.params.id, companyId: req.companyId }).populate('user');
         if (!attendance) return res.status(404).json({ message: 'Attendance record not found' });
         
+        // Authorization Check
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('attendance.update_others');
+
+        const isOwner = attendance.user?._id.toString() === req.user._id.toString();
+        const isManager = attendance.user?.reportingManagers?.some(m => m.toString() === req.user._id.toString());
+
+        if (!isOwner && !isManager && !isAdmin) {
+            return res.status(403).json({ message: 'Not authorized to update this attendance record' });
+        }
+
         if (clockIn) {
             attendance.clockIn = new Date(clockIn);
             attendance.clockInIST = new Date(clockIn).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
@@ -253,8 +280,27 @@ exports.updateAttendance = async (req, res) => {
 exports.createAttendance = async (req, res) => {
     try {
         const { date, clockIn, clockOut, userId } = req.body;
+        const targetUserId = userId || req.user._id;
+
+        // Authorization Check
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('attendance.update_others');
+
+        const isSelf = targetUserId.toString() === req.user._id.toString();
+        
+        // If not self and not admin/privileged, check if manager
+        if (!isSelf && !isAdmin) {
+            const targetUser = await User.findById(targetUserId);
+            const isManager = targetUser?.reportingManagers?.some(m => m.toString() === req.user._id.toString());
+            if (!isManager) {
+                return res.status(403).json({ message: 'Not authorized to create attendance for this user' });
+            }
+        }
+
         const newAttendance = new Attendance({
-            user: userId || req.user._id,
+            user: targetUserId,
             companyId: req.companyId,
             date: new Date(date),
             status: 'PRESENT',
@@ -504,24 +550,17 @@ exports.processRegularizationRequest = async (req, res) => {
         const request = await AttendanceRegularization.findOne({ _id: req.params.id, companyId: req.companyId });
         if (!request) return res.status(404).json({ message: 'Request not found' });
 
-        // Authorization check: Only Admin or a reporting manager of the user can process
+        // Authorization check: Only Admin, reporting manager, or permission holder can process
         const isAdmin = req.user.roles?.some(r => 
             (typeof r === 'string' && r === 'Admin') || 
             (typeof r === 'object' && r.name === 'Admin')
-        ) || req.user.permissions?.includes('*');
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('attendance.update_others');
 
         const requestUser = await User.findById(request.user);
         const isReportingManager = requestUser?.reportingManagers?.some(m => m.toString() === req.user._id.toString());
         const isAssignedManager = request.manager && request.manager.toString() === req.user._id.toString();
 
         if (!isAdmin && !isReportingManager && !isAssignedManager) {
-            console.log('[DEBUG] Authorization Failed:', { 
-                isAdmin, 
-                isReportingManager, 
-                isAssignedManager, 
-                userId: req.user._id,
-                reportingManagers: requestUser?.reportingManagers
-            });
             return res.status(403).json({ message: 'Not authorized to process this request' });
         }
 

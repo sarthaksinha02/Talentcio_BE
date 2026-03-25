@@ -59,6 +59,11 @@ module.exports = [
         module: "TIMESHEET",
         description: "View timesheet and attendance of all users"
     },
+    {
+        key: "timesheet.update_others",
+        module: "TIMESHEET",
+        description: "Update timesheet entries for other users"
+    },
 
     // ATTENDANCE
     {
@@ -85,6 +90,11 @@ module.exports = [
         key: "attendance.update_self",
         module: "ATTENDANCE",
         description: "Edit own attendance time (Regularization)"
+    },
+    {
+        key: "attendance.update_others",
+        module: "ATTENDANCE",
+        description: "Update attendance of other users"
     },
 
     // PROJECT MANAGEMENT
