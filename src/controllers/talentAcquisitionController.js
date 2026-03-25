@@ -114,10 +114,11 @@ exports.createHiringRequest = async (req, res) => {
 // --- getHiringRequests ---
 exports.getHiringRequests = async (req, res) => {
     try {
-        const { status, page = 1, limit = 10 } = req.query;
+        const { status, page = 1, limit = 10, client } = req.query;
         let query = { companyId: req.companyId };
 
         if (status) query.status = status;
+        if (client) query.client = client;
 
         // Use permissions to filter what they see
         // Admin/HR sees all. ta.view sees all. Manager sees own.
@@ -1240,5 +1241,59 @@ exports.uploadJDFile = async (req, res) => {
     } catch (error) {
         console.error('Error uploading JD file:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// --- getTAClients ---
+exports.getTAClients = async (req, res) => {
+    try {
+        const query = { companyId: req.companyId };
+        
+        // Find all unique client names that have hiring requests
+        const clients = await HiringRequest.distinct('client', query);
+        
+        const clientStats = await Promise.all(clients.map(async (clientName) => {
+            const runningCount = await HiringRequest.countDocuments({ 
+                companyId: req.companyId, 
+                client: clientName, 
+                status: 'Approved'
+            });
+            const pendingCount = await HiringRequest.countDocuments({ 
+                companyId: req.companyId, 
+                client: clientName, 
+                status: { $in: ['Pending_Approval', 'Pending_L1', 'Pending_Final', 'Submitted'] } 
+            });
+            const closedCount = await HiringRequest.countDocuments({ 
+                companyId: req.companyId, 
+                client: clientName, 
+                status: 'Closed' 
+            });
+            const rejectedCount = await HiringRequest.countDocuments({ 
+                companyId: req.companyId, 
+                client: clientName, 
+                status: 'Rejected' 
+            });
+            const totalCount = await HiringRequest.countDocuments({
+                companyId: req.companyId,
+                client: clientName
+            });
+
+            return {
+                name: clientName,
+                activePositions: runningCount,
+                pendingPositions: pendingCount,
+                closedPositions: closedCount,
+                rejectedPositions: rejectedCount,
+                totalPositions: totalCount
+            };
+        }));
+
+        // Sort by active positions descending
+        clientStats.sort((a, b) => b.activePositions - a.activePositions);
+
+        res.status(200).json(clientStats);
+    } catch (error) {
+        console.error('getTAClients error:', error);
+        res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };

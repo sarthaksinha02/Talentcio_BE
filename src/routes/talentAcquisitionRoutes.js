@@ -24,6 +24,9 @@ router.post('/hiring-request/transfer-candidate/:candidateId', protect, authoriz
 router.get('/analytics/global', protect, taController.getGlobalAnalytics);
 router.get('/analytics/client/:clientName', protect, taController.getClientAnalytics);
 
+// Clients list for TA
+router.get('/clients', protect, taController.getTAClients);
+
 // File Uploads
 router.post('/hiring-request/upload-jd', protect, upload.single('jdFile'), taController.uploadJDFile);
 
