@@ -33,6 +33,7 @@ router.patch('/:id/internal-remark', protect, candidateController.updateCandidat
 router.patch('/:id/decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updateCandidateDecision);
 router.patch('/:id/phase2-decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updatePhase2Decision);
 router.patch('/:id/phase3-decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updatePhase3Decision);
+router.post('/:id/transfer-to-onboarding', protect, authorize('ta.edit'), candidateController.transferToOnboarding);
 
 // Current User's Scheduled Interviews
 router.get('/my/interviews', protect, candidateController.getMyScheduledInterviews);

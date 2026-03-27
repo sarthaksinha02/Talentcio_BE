@@ -238,6 +238,7 @@ const candidateSchema = new mongoose.Schema({
     // Tracking Reopened Candidates
     isTransferred: { type: Boolean, default: false },
     transferredFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' },
+    isTransferredToOnboarding: { type: Boolean, default: false },
 
     // Skill Ratings
     skillRatings: [{

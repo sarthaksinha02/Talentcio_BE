@@ -8,11 +8,12 @@ const documentSchema = new mongoose.Schema({
     publicId: { type: String, default: '' },
     status: {
         type: String,
-        enum: ['Pending', 'Uploaded', 'Approved', 'Re-upload Required'],
+        enum: ['Pending', 'Mail Sent', 'Uploaded', 'Approved', 'Re-upload Required'],
         default: 'Pending'
     },
     rejectionReason: { type: String, default: '' },
-    uploadedAt: Date
+    uploadedAt: Date,
+    emailSentAt: Date
 }, { _id: true });
 
 const auditEntrySchema = new mongoose.Schema({
@@ -21,6 +22,15 @@ const auditEntrySchema = new mongoose.Schema({
     ip: { type: String, default: '' },
     details: { type: String, default: '' }
 }, { _id: false });
+
+const extensionRequestSchema = new mongoose.Schema({
+    requestedAt: { type: Date, default: Date.now },
+    reason: { type: String, required: true },
+    requestedDays: { type: Number, required: true },
+    status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' },
+    respondedAt: { type: Date },
+    responseNote: { type: String, default: '' }
+});
 
 const onboardingEmployeeSchema = new mongoose.Schema({
     // --- Identity & Credentials ---
@@ -40,6 +50,11 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     },
     passwordChangedAt: Date,
     credentialsExpireAt: Date,
+    credentialRegenerationRequest: {
+        requested: { type: Boolean, default: false },
+        requestedAt: { type: Date },
+        reason: { type: String, default: '' }
+    },
 
     // --- Basic Info (set by HR) ---
     firstName: { type: String, required: true, trim: true },
@@ -138,6 +153,17 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     // --- Section 5: Offer Letter Declaration ---
     offerDeclaration: {
         hasReadOfferLetter: { type: Boolean, default: false },
+        hasReadPolicies: { type: Boolean, default: false },
+        acceptedPolicies: [{
+            policyId: String,
+            name: String,
+            acceptedAt: { type: Date, default: Date.now }
+        }],
+        acceptedTemplates: [{
+            templateId: String,
+            name: String,
+            acceptedAt: { type: Date, default: Date.now }
+        }],
         hasProvidedTrueInfo: { type: Boolean, default: false },
         agreesToOriginalVerification: { type: Boolean, default: false },
         eSignName: { type: String, default: '' },
@@ -152,8 +178,13 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     offerLetterUrl: { type: String, default: '' },
     offerLetterPublicId: { type: String, default: '' },
 
-    // --- Audit ---
+    // --- Selective Onboarding (Items checked by HR) ---
+    requestedSections: [{ type: String }],
+    requestedDocuments: [{ type: String }],
+
+    // --- Audit & Requests ---
     auditLog: [auditEntrySchema],
+    extensionRequests: [extensionRequestSchema],
 
     // --- Multi-tenant ---
     companyId: {
@@ -165,6 +196,15 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
+    },
+    sourcedFromTA: {
+        type: Boolean,
+        default: false
+    },
+    transferredToUserId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
     }
 }, { timestamps: true });
 
@@ -187,8 +227,21 @@ onboardingEmployeeSchema.methods.matchPassword = async function (enteredPassword
 // Generate Temp Employee ID
 onboardingEmployeeSchema.statics.generateTempId = async function (companyId) {
     const year = new Date().getFullYear();
-    const count = await this.countDocuments({ companyId });
-    return `EMP-${year}-${String(count + 1).padStart(4, '0')}`;
+    const prefix = `EMP-${year}-`;
+    
+    // Find the record with the highest numeric suffix for this year
+    const lastEmployee = await this.findOne({ 
+        companyId, 
+        tempEmployeeId: { $regex: new RegExp(`^${prefix}`) } 
+    }).sort({ tempEmployeeId: -1 });
+
+    let lastNumber = 0;
+    if (lastEmployee) {
+        const parts = lastEmployee.tempEmployeeId.split('-');
+        lastNumber = parseInt(parts[parts.length - 1], 10) || 0;
+    }
+
+    return `${prefix}${String(lastNumber + 1).padStart(4, '0')}`;
 };
 
 module.exports = mongoose.model('OnboardingEmployee', onboardingEmployeeSchema);

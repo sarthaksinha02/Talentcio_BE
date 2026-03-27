@@ -47,9 +47,11 @@ exports.addEmployee = async (req, res) => {
 
         // Default document slots
         const defaultDocuments = [
+            { type: 'resume', label: 'Updated Resume' },
             { type: 'aadhaar_front', label: 'Aadhaar Card (Front)' },
             { type: 'aadhaar_back', label: 'Aadhaar Card (Back)' },
             { type: 'pan', label: 'PAN Card' },
+            { type: 'salary_slip', label: 'Salary Slip' },
             { type: 'passport', label: 'Passport (Optional)' },
             { type: '10th_marksheet', label: '10th Marksheet / Certificate' },
             { type: '12th_marksheet', label: '12th Marksheet / Certificate' },
@@ -79,6 +81,8 @@ exports.addEmployee = async (req, res) => {
             documents: defaultDocuments,
             companyId: req.companyId,
             createdBy: req.user._id,
+            requestedSections: ['Personal Details', 'Emergency Contact', 'Bank Details', 'Offer Declaration'],
+            requestedDocuments: defaultDocuments.map(d => d.label),
             auditLog: [{ action: 'CREATED', details: `Created by ${req.user.firstName || 'Admin'}` }]
         });
 
@@ -143,6 +147,153 @@ exports.addEmployee = async (req, res) => {
     }
 };
 
+// --- Send selective pre-onboarding email ---
+exports.sendPreOnboardingEmail = async (req, res) => {
+    try {
+        const { sections, documents } = req.body;
+
+        if ((!sections || sections.length === 0) && (!documents || documents.length === 0)) {
+            return res.status(400).json({ message: 'Please select at least one section or document' });
+        }
+
+        const employee = await OnboardingEmployee.findOne({ _id: req.params.id, companyId: req.companyId });
+        if (!employee) {
+            return res.status(404).json({ message: 'Employee not found' });
+        }
+
+        // Save requested items for portal filtering (additive merge)
+        const existingSections = new Set(employee.requestedSections || []);
+        (sections || []).forEach(s => existingSections.add(s));
+        employee.requestedSections = [...existingSections];
+
+        const existingDocs = new Set(employee.requestedDocuments || []);
+        (documents || []).forEach(d => existingDocs.add(d));
+        employee.requestedDocuments = [...existingDocs];
+
+        // Mark emailed documents as "Mail Sent" if they are still Pending
+        if (documents && documents.length > 0) {
+            const docLabelsSet = new Set(documents);
+            employee.documents.forEach(doc => {
+                if (docLabelsSet.has(doc.label) && doc.status === 'Pending') {
+                    doc.status = 'Mail Sent';
+                    doc.emailSentAt = new Date();
+                }
+            });
+        }
+
+        await employee.save();
+
+        const portalUrl = `${req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'}/pre-onboarding/login`;
+
+        // Credentials Logic - include original ID and password (regenerate if not changed yet)
+        let credentialsHtml = '';
+        let rawPassword = '';
+        if (employee.isPasswordChanged === false) {
+            rawPassword = generateTempPassword();
+            employee.tempPassword = rawPassword; // Hooks will hash it
+            await employee.save();
+            credentialsHtml = `
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 24px 0;">
+                    <h3 style="color: #1e293b; font-size: 15px; margin: 0 0 12px; font-weight: 700;">🔑 Your Login Credentials</h3>
+                    <p style="margin: 4px 0; font-size: 14px;"><strong>Employee ID:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${employee.tempEmployeeId}</code></p>
+                    <p style="margin: 4px 0; font-size: 14px;"><strong>Temporary Password:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${rawPassword}</code></p>
+                    ${employee.credentialsExpireAt ? `
+                    <p style="margin: 12px 0 0; font-size: 13px; color: #dc2626;"><strong>⏳ Credentials Expire On:</strong> ${new Date(employee.credentialsExpireAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                    ` : ''}
+                    <p style="color: #64748b; font-size: 12px; margin-top: 8px;">⚠️ You will be asked to change your password on first login. Please keep these credentials secure.</p>
+                </div>
+            `;
+        } else {
+            credentialsHtml = `
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 24px 0;">
+                    <h3 style="color: #1e293b; font-size: 15px; margin: 0 0 12px; font-weight: 700;">🔑 Portal Access</h3>
+                    <p style="margin: 4px 0; font-size: 14px;"><strong>Employee ID:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${employee.tempEmployeeId}</code></p>
+                    <p style="margin: 4px 0; font-size: 14px;">Please use the <strong>password you previously set</strong> to log in.</p>
+                </div>
+            `;
+        }
+
+        // Build sections list HTML
+        let sectionsHtml = '';
+        if (sections && sections.length > 0) {
+            sectionsHtml = `
+                <div style="margin-bottom: 24px;">
+                    <h3 style="color: #1e293b; font-size: 16px; margin: 0 0 12px; border-bottom: 2px solid #3b82f6; padding-bottom: 8px;">📋 Forms to Complete</h3>
+                    <ul style="margin: 0; padding: 0 0 0 20px; color: #334155;">
+                        ${sections.map(s => `<li style="padding: 6px 0; font-size: 14px;">${s}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+
+        // Build documents list HTML
+        let documentsHtml = '';
+        if (documents && documents.length > 0) {
+            documentsHtml = `
+                <div style="margin-bottom: 24px;">
+                    <h3 style="color: #1e293b; font-size: 16px; margin: 0 0 12px; border-bottom: 2px solid #8b5cf6; padding-bottom: 8px;">📎 Items to Complete</h3>
+                    <ul style="margin: 0; padding: 0 0 0 20px; color: #334155;">
+                        ${documents.map(d => `<li style="padding: 6px 0; font-size: 14px;">${d}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+
+        const deadlineStr = employee.documentDeadline
+            ? new Date(employee.documentDeadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+            : 'Not specified';
+
+        const emailHtml = `
+            <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+                <div style="background: linear-gradient(135deg, #2563eb, #7c3aed); padding: 32px; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 22px;">Pre-Onboarding Action Required</h1>
+                    <p style="color: #e0e7ff; margin-top: 8px; font-size: 14px;">Please complete the following items on your portal</p>
+                </div>
+                <div style="padding: 32px;">
+                    <p>Hello <strong>${employee.firstName}</strong>,</p>
+                    <p style="color: #475569;">Your HR team has requested that you complete the following items on the pre-onboarding portal before your joining date.</p>
+
+                    ${credentialsHtml}
+                    ${sectionsHtml}
+                    ${documentsHtml}
+
+                    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px; margin: 20px 0; font-size: 13px; color: #92400e;">
+                        ⏰ <strong>Submission Deadline:</strong> ${deadlineStr}
+                    </div>
+
+                    <div style="text-align: center; margin: 28px 0;">
+                        <a href="${portalUrl}" style="background: linear-gradient(135deg, #2563eb, #7c3aed); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 15px;">Open Pre-Onboarding Portal</a>
+                    </div>
+                </div>
+                <div style="background: #f1f5f9; padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">
+                    © ${new Date().getFullYear()} TalentCio. All rights reserved.
+                </div>
+            </div>
+        `;
+
+        await sendEmail({
+            to: employee.email,
+            subject: `Action Required: Complete Your Pre-Onboarding – ${employee.tempEmployeeId}`,
+            html: emailHtml
+        });
+
+        // Add audit log
+        await OnboardingEmployee.findByIdAndUpdate(employee._id, {
+            $push: {
+                auditLog: {
+                    action: 'PRE_ONBOARD_EMAIL_SENT',
+                    details: `Email sent with ${(sections || []).length} section(s) and ${(documents || []).length} document(s)`
+                }
+            }
+        });
+
+        res.json({ message: 'Pre-onboarding email sent successfully' });
+    } catch (error) {
+        console.error('Error sending pre-onboarding email:', error);
+        res.status(500).json({ message: 'Failed to send email', error: error.message });
+    }
+};
+
 // --- Bulk add employees ---
 exports.bulkAddEmployees = async (req, res) => {
     try {
@@ -166,9 +317,11 @@ exports.bulkAddEmployees = async (req, res) => {
                 const rawPassword = generateTempPassword();
 
                 const defaultDocuments = [
+                    { type: 'resume', label: 'Updated Resume' },
                     { type: 'aadhaar_front', label: 'Aadhaar Card (Front)' },
                     { type: 'aadhaar_back', label: 'Aadhaar Card (Back)' },
                     { type: 'pan', label: 'PAN Card' },
+                    { type: 'salary_slip', label: 'Salary Slip' },
                     { type: 'passport', label: 'Passport (Optional)' },
                     { type: '10th_marksheet', label: '10th Marksheet / Certificate' },
                     { type: '12th_marksheet', label: '12th Marksheet / Certificate' },
@@ -288,6 +441,126 @@ exports.getOnboardingEmployee = async (req, res) => {
         res.status(200).json(employee);
     } catch (error) {
         console.error('Error fetching onboarding employee:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// --- Update onboarding employee details ---
+exports.updateEmployee = async (req, res) => {
+    try {
+        const { firstName, lastName, email, phone, designation, department, joiningDate, documentDeadline, workLocation, address, probationPeriod, salary } = req.body;
+        
+        const employee = await OnboardingEmployee.findOne({ _id: req.params.id, companyId: req.companyId });
+        if (!employee) return res.status(404).json({ message: 'Employee not found' });
+
+        // Update fields
+        if (firstName) employee.firstName = firstName;
+        if (lastName) employee.lastName = lastName;
+        if (email) employee.email = email;
+        if (phone) employee.phone = phone;
+        if (designation) employee.designation = designation;
+        if (department) employee.department = department;
+        if (joiningDate) employee.joiningDate = joiningDate;
+        if (documentDeadline) employee.documentDeadline = documentDeadline;
+        if (workLocation) employee.workLocation = workLocation;
+        if (address) employee.address = address;
+        if (probationPeriod) employee.probationPeriod = probationPeriod;
+        if (salary) {
+            employee.salary = { ...employee.salary.toObject(), ...salary };
+        }
+
+        // Add audit log
+        employee.auditLog.push({
+            action: 'DETAILS_UPDATED',
+            details: `Details updated by ${req.user.firstName || 'Admin'}`
+        });
+
+        await employee.save();
+        res.status(200).json({ message: 'Employee updated successfully', employee });
+    } catch (error) {
+        console.error('Error updating employee:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// --- Regenerate temporary credentials ---
+exports.regenerateCredentials = async (req, res) => {
+    try {
+        const employee = await OnboardingEmployee.findOne({ _id: req.params.id, companyId: req.companyId });
+        if (!employee) return res.status(404).json({ message: 'Employee not found' });
+
+        const newPassword = Math.random().toString(36).slice(-8);
+        employee.tempPassword = newPassword;
+        
+        // Reset expiry to 7 days from now
+        const expiry = new Date();
+        expiry.setDate(expiry.getDate() + 7);
+        employee.credentialsExpireAt = expiry;
+
+        // Clear any pending regeneration request
+        if (employee.credentialRegenerationRequest) {
+            employee.credentialRegenerationRequest.requested = false;
+        }
+
+        // Add audit log
+        employee.auditLog.push({
+            action: 'CREDENTIALS_REGENERATED',
+            details: `Credentials regenerated by ${req.user.firstName || 'Admin'}`
+        });
+
+        await employee.save();
+
+        // Send notification email to the employee
+        const portalUrl = `${req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'}/pre-onboarding/login`;
+        
+        await sendEmail({
+            to: employee.email,
+            subject: `Action Required: Your Portal Credentials have been Updated`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b; line-height: 1.6;">
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <h2 style="color: #2563eb; margin: 0;">Credentials Updated</h2>
+                        <p style="color: #64748b; font-size: 14px;">Pre-Onboarding Portal Access</p>
+                    </div>
+                    
+                    <p>Hello <strong>${employee.firstName}</strong>,</p>
+                    <p>Your login credentials for the Pre-Onboarding Portal have been updated by the HR administrator. Please use the new temporary password provided below to access your account.</p>
+                    
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 24px 0;">
+                        <p style="margin: 4px 0; font-size: 14px;"><strong>Employee ID:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${employee.tempEmployeeId}</code></p>
+                        <p style="margin: 4px 0; font-size: 14px;"><strong>New Temporary Password:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${newPassword}</code></p>
+                        <p style="margin: 12px 0 0; font-size: 13px; color: #dc2626;"><strong>⏳ Credentials Expire On:</strong> ${expiry.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                    </div>
+
+                    ${employee.documentDeadline ? `
+                    <div style="border-left: 4px solid #f59e0b; padding: 12px 16px; background: #fffbeb; margin-bottom: 24px;">
+                        <p style="margin: 0; font-size: 14px; color: #92400e;"><strong>📅 Document Submission Deadline:</strong> ${new Date(employee.documentDeadline).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                    </div>
+                    ` : ''}
+
+                    <div style="text-align: center; margin: 32px 0;">
+                        <a href="${portalUrl}" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">Login to Portal</a>
+                    </div>
+
+                    <p style="font-size: 13px; color: #64748b; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+                        <strong>Important Security Note:</strong> You will be required to change this temporary password upon your next login. Please keep these credentials secure and do not share them.
+                    </p>
+                    
+                    <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-top: 24px;">
+                        This is an automated message. Please do not reply to this email.
+                    </p>
+                </div>
+            `
+        });
+        
+        res.status(200).json({ 
+            message: 'Credentials regenerated and email sent successfully', 
+            tempEmployeeId: employee.tempEmployeeId,
+            tempPassword: newPassword,
+            expiry
+        });
+    } catch (error) {
+        console.error('Error regenerating credentials:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
@@ -532,7 +805,16 @@ exports.getMyOnboarding = async (req, res) => {
 
         if (!employee) return res.status(404).json({ message: 'Not found' });
 
-        res.status(200).json(employee);
+        // Fetch company settings for templates and policies
+        const company = await Company.findById(employee.companyId).select('settings.onboarding');
+        const policies = company?.settings?.onboarding?.policies || [];
+        const dynamicTemplates = company?.settings?.onboarding?.dynamicTemplates || [];
+
+        res.status(200).json({
+            ...employee,
+            companyPolicies: policies,
+            dynamicTemplates: dynamicTemplates
+        });
     } catch (error) {
         console.error('Error fetching profile:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
@@ -665,19 +947,42 @@ exports.submitOnboarding = async (req, res) => {
             return res.status(400).json({ message: 'Already submitted' });
         }
 
-        // Validate all required sections are complete
+        // Validate only requested items
         const errors = [];
-        if (!employee.personalDetails?.isComplete) errors.push('Personal Details incomplete');
-        if (!employee.emergencyContact?.isComplete) errors.push('Emergency Contact incomplete');
-        if (!employee.bankDetails?.isComplete) errors.push('Bank Details incomplete');
-        if (!employee.offerDeclaration?.isComplete) errors.push('Offer Declaration incomplete');
+        const reqSections = employee.requestedSections || [];
+        const reqDocs = employee.requestedDocuments || [];
+        const isSelective = reqSections.length > 0 || reqDocs.length > 0;
 
-        // Check at least mandatory docs are uploaded
-        const mandatoryDocTypes = ['aadhaar_front', 'aadhaar_back', 'pan', 'passport_photo'];
-        for (const docType of mandatoryDocTypes) {
-            const doc = employee.documents.find(d => d.type === docType);
-            if (doc && (!doc.url || doc.status === 'Pending')) {
-                errors.push(`${doc.label} not uploaded`);
+        // Form Sections Validation
+        if (!isSelective || reqSections.includes('Personal Details')) {
+            if (!employee.personalDetails?.isComplete) errors.push('Personal Details incomplete');
+        }
+        if (!isSelective || reqSections.includes('Emergency Contact')) {
+            if (!employee.emergencyContact?.isComplete) errors.push('Emergency Contact incomplete');
+        }
+        if (!isSelective || reqSections.includes('Bank Details')) {
+            if (!employee.bankDetails?.isComplete) errors.push('Bank Details incomplete');
+        }
+        if (!isSelective || reqSections.includes('Offer Declaration')) {
+            if (!employee.offerDeclaration?.isComplete) errors.push('Offer Declaration incomplete');
+        }
+
+        // Documents Validation
+        const mandatoryDocTypes = ['pan', 'passport_photo', 'aadhaar_front', 'aadhaar_back'];
+        for (const doc of employee.documents) {
+            const isMandatory = mandatoryDocTypes.includes(doc.type);
+            const isRequested = reqDocs.includes(doc.label);
+
+            if (isSelective) {
+                // If selective, only validate if it was specifically requested
+                if (isRequested && (doc.status === 'Pending' || !doc.url)) {
+                    errors.push(`${doc.label} not uploaded`);
+                }
+            } else if (isMandatory) {
+                // Not selective, validate all standard mandatory docs
+                if (doc.status === 'Pending' || !doc.url) {
+                    errors.push(`${doc.label} not uploaded`);
+                }
             }
         }
 
@@ -781,6 +1086,128 @@ exports.uploadAndSetTemplate = async (req, res) => {
     } catch (error) {
         console.error('Error uploading template:', error);
         res.status(500).json({ message: 'Failed to upload template', error: error.message });
+    }
+};
+
+// POST /api/onboarding/settings/policies/upload
+exports.addPolicy = async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+
+        const { name, isRequired } = req.body;
+        if (!name) return res.status(400).json({ message: 'Policy name is required' });
+
+        const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
+        const url = req.file.path;
+        const publicId = extractPublicIdFromUrl(url);
+
+        const newPolicy = {
+            name,
+            url,
+            publicId,
+            isRequired: isRequired === 'true' || isRequired === true
+        };
+
+        await Company.findByIdAndUpdate(req.companyId, {
+            $push: { 'settings.onboarding.policies': newPolicy }
+        });
+
+        res.status(200).json({ message: 'Policy uploaded successfully!', policy: newPolicy });
+    } catch (error) {
+        console.error('Error adding policy:', error);
+        res.status(500).json({ message: 'Failed to add policy', error: error.message });
+    }
+};
+
+// DELETE /api/onboarding/settings/policies/:policyId
+exports.deletePolicy = async (req, res) => {
+    try {
+        const { policyId } = req.params;
+        const company = await Company.findById(req.companyId);
+
+        const policy = company.settings.onboarding.policies.id(policyId);
+        if (!policy) return res.status(404).json({ message: 'Policy not found' });
+
+        // Delete from Cloudinary
+        if (policy.publicId) {
+            try {
+                await cloudinary.uploader.destroy(policy.publicId, { resource_type: 'raw' });
+            } catch (e) { /* ignore */ }
+        }
+
+        // Remove from DB
+        await Company.findByIdAndUpdate(req.companyId, {
+            $pull: { 'settings.onboarding.policies': { _id: policyId } }
+        });
+
+        res.json({ message: 'Policy deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting policy:', error);
+        res.status(500).json({ message: 'Failed to delete policy', error: error.message });
+    }
+};
+
+// POST /api/onboarding/my-profile/policies/:policyId/accept
+exports.acceptPolicy = async (req, res) => {
+    try {
+        const { policyId } = req.params;
+        const employee = req.onboardingEmployee;
+
+        // Check if already accepted
+        const alreadyAccepted = employee.offerDeclaration.acceptedPolicies.find(p => p.policyId === policyId);
+        if (alreadyAccepted) return res.json({ message: 'Policy already accepted' });
+
+        // Get policy name from company settings
+        const company = await Company.findById(employee.companyId);
+        const policy = company.settings.onboarding.policies.id(policyId);
+        if (!policy) return res.status(404).json({ message: 'Policy not found' });
+
+        await OnboardingEmployee.findByIdAndUpdate(employee._id, {
+            $push: {
+                'offerDeclaration.acceptedPolicies': {
+                    policyId,
+                    name: policy.name,
+                    acceptedAt: new Date()
+                }
+            }
+        });
+
+        res.json({ message: 'Policy accepted' });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to accept policy', error: error.message });
+    }
+};
+
+// POST /api/onboarding/my-profile/templates/:templateId/accept
+exports.acceptTemplate = async (req, res) => {
+    try {
+        const { templateId } = req.params;
+        const employeeId = req.onboardingEmployee._id;
+
+        const company = await Company.findById(req.onboardingEmployee.companyId).select('settings.onboarding').lean();
+        const template = company.settings.onboarding.dynamicTemplates.find(t => t._id.toString() === templateId);
+
+        if (!template) return res.status(404).json({ message: 'Template not found' });
+
+        // Check if already accepted
+        const employee = await OnboardingEmployee.findById(employeeId);
+        const alreadyAccepted = employee.offerDeclaration.acceptedTemplates.find(t => t.templateId === templateId);
+        if (alreadyAccepted) return res.json({ message: 'Template already accepted' });
+
+        await OnboardingEmployee.findByIdAndUpdate(employeeId, {
+            $push: {
+                'offerDeclaration.acceptedTemplates': {
+                    templateId,
+                    name: template.name,
+                    acceptedAt: new Date()
+                }
+            }
+        });
+
+        res.json({ message: 'Template accepted' });
+    } catch (error) {
+        console.error('Error accepting template:', error);
+        res.status(500).json({ message: 'Failed to accept template', error: error.message });
     }
 };
 
@@ -1123,3 +1550,442 @@ exports.acceptOfferLetter = async (req, res) => {
         res.status(500).json({ message: 'Failed to accept offer letter', error: error.message });
     }
 };
+
+// --- Multi-Document Management ---
+
+// POST /api/onboarding/settings/templates/dynamic/upload
+exports.addDynamicTemplate = async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+
+        const { name, isRequired } = req.body;
+        if (!name) return res.status(400).json({ message: 'Template name is required' });
+
+        const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
+        const url = req.file.path;
+        const publicId = extractPublicIdFromUrl(url);
+
+        const newTemplate = {
+            name,
+            url,
+            publicId,
+            isRequired: isRequired === 'true' || isRequired === true
+        };
+
+        await Company.findByIdAndUpdate(req.companyId, {
+            $push: { 'settings.onboarding.dynamicTemplates': newTemplate }
+        });
+
+        res.status(200).json({ message: 'Dynamic template uploaded successfully!', template: newTemplate });
+    } catch (error) {
+        console.error('Error adding dynamic template:', error);
+        res.status(500).json({ message: 'Failed to add template', error: error.message });
+    }
+};
+
+// DELETE /api/onboarding/settings/templates/dynamic/:templateId
+exports.deleteDynamicTemplate = async (req, res) => {
+    try {
+        const { templateId } = req.params;
+        const company = await Company.findById(req.companyId);
+
+        const template = company.settings.onboarding.dynamicTemplates.find(t => t._id.toString() === templateId);
+        if (!template) return res.status(404).json({ message: 'Template not found' });
+
+        const { cloudinary } = require('../config/cloudinary');
+        if (template.publicId) {
+            try {
+                await cloudinary.uploader.destroy(template.publicId, { resource_type: 'raw' });
+            } catch (e) { /* ignore */ }
+        }
+
+        await Company.findByIdAndUpdate(req.companyId, {
+            $pull: { 'settings.onboarding.dynamicTemplates': { _id: templateId } }
+        });
+
+        res.json({ message: 'Template deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting template:', error);
+        res.status(500).json({ message: 'Failed to delete template', error: error.message });
+    }
+};
+
+// GET /api/onboarding/my-profile/download-template/:templateId
+exports.downloadTemplateById = async (req, res) => {
+    try {
+        const { templateId } = req.params;
+        const employeeId = req.onboardingEmployee._id;
+
+        const [employee, company] = await Promise.all([
+            OnboardingEmployee.findById(employeeId).populate('createdBy').lean(),
+            Company.findById(req.onboardingEmployee.companyId).select('settings.onboarding').lean()
+        ]);
+
+        const template = company.settings.onboarding.dynamicTemplates.find(t => t._id.toString() === templateId);
+        if (!template) return res.status(404).json({ message: 'Template not found' });
+
+        const content = await getTemplateContent(template.url);
+        const zip = new PizZip(content);
+        const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => '—' });
+
+        const fullName = employee.personalDetails?.fullName || `${employee.firstName} ${employee.lastName}`.trim();
+        const hrUser = employee.createdBy || {};
+        const permAddr = employee.personalDetails?.permanentAddress || employee.personalDetails?.currentAddress || {};
+
+        doc.render({
+            offer_date: formatDate(new Date()),
+            employee_full_name: fullName,
+            employee_id: employee.tempEmployeeId,
+            designation: employee.designation || '—',
+            department: employee.department || '—',
+            joining_date: formatDate(employee.joiningDate),
+            work_location: employee.workLocation || '—',
+            employee_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
+            hr_name: hrUser.firstName ? `${hrUser.firstName} ${hrUser.lastName || ''}`.trim() : 'Authorized Signatory',
+            hr_designation: hrUser.designation || 'HR Manager'
+        });
+
+        const buffer = doc.getZip().generate({ type: 'nodebuffer' });
+        const safeName = template.name.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_');
+        res.setHeader('Content-Disposition', `attachment; filename=${safeName}.docx`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.send(buffer);
+    } catch (error) {
+        console.error('Error downloading template:', error);
+        res.status(500).json({ message: 'Failed to download template', error: error.message });
+    }
+};
+
+// ==========================================
+// TRANSFER TO ACTIVE EMPLOYEE
+// ==========================================
+
+const User = require('../models/User');
+const EmployeeProfile = require('../models/EmployeeProfile');
+const Role = require('../models/Role');
+
+// Map onboarding document types to dossier categories
+const DOC_CATEGORY_MAP = {
+    'resume': 'Resume',
+    'pan': 'ID Proof',
+    'aadhaar_front': 'ID Proof',
+    'aadhaar_back': 'ID Proof',
+    'passport': 'ID Proof',
+    'salary_slip': 'Payslips',
+    '10th_marksheet': 'Education',
+    '12th_marksheet': 'Education',
+    'graduation': 'Education',
+    'relieving_letter': 'Relieving Letter',
+    'experience_certificate': 'Employment',
+    'passport_photo': 'Other'
+};
+
+exports.transferToActiveEmployee = async (req, res) => {
+    try {
+        const { roleId, employeeCode, password } = req.body || {};
+        
+        const employee = await OnboardingEmployee.findOne({ _id: req.params.id, companyId: req.companyId });
+        if (!employee) return res.status(404).json({ message: 'Onboarding employee not found' });
+
+        // Check if already transferred
+        if (employee.transferredToUserId) {
+            return res.status(400).json({ message: 'This employee has already been transferred to an active user.' });
+        }
+
+        // Check if user with this email already exists
+        const existingUser = await User.findOne({ email: employee.email, companyId: req.companyId });
+        if (existingUser) {
+            return res.status(400).json({ message: `A user with email ${employee.email} already exists.` });
+        }
+
+        // Validate role
+        let assignedRoleId = roleId;
+        if (!assignedRoleId) {
+            // Default to "Employee" role if none provided
+            const defaultRole = await Role.findOne({ name: 'Employee', companyId: req.companyId });
+            if (!defaultRole) {
+                return res.status(400).json({ message: 'No roleId provided and no default "Employee" role found. Please specify a role.' });
+            }
+            assignedRoleId = defaultRole._id;
+        }
+
+        // Generate temp password if not provided
+        const userPassword = password || generateTempPassword();
+
+        // 1. Create the User account
+        const newUser = await User.create({
+            companyId: req.companyId,
+            firstName: employee.firstName,
+            lastName: employee.lastName || '',
+            email: employee.email,
+            password: userPassword,
+            roles: [assignedRoleId],
+            department: employee.department || '',
+            workLocation: employee.workLocation || 'Headquarters',
+            employmentType: 'Full Time',
+            employeeCode: employeeCode || employee.tempEmployeeId,
+            joiningDate: employee.joiningDate || new Date(),
+            isPasswordResetRequired: true
+        });
+
+        // 2. Build EmployeeProfile with onboarding data
+        const personalDetails = employee.personalDetails || {};
+        const emergencyContact = employee.emergencyContact || {};
+        const bankDetails = employee.bankDetails || {};
+
+        // Map onboarding documents to dossier documents
+        const dossierDocuments = (employee.documents || [])
+            .filter(doc => doc.url) // Only docs that were actually uploaded
+            .map(doc => ({
+                category: DOC_CATEGORY_MAP[doc.type] || 'Other',
+                title: doc.label,
+                fileName: doc.label.replace(/[^a-zA-Z0-9]/g, '_') + '.pdf',
+                url: doc.url,
+                uploadDate: doc.uploadedAt || new Date(),
+                verificationStatus: doc.status === 'Approved' ? 'Verified' : 'Pending'
+            }));
+
+        const profile = new EmployeeProfile({
+            user: newUser._id,
+            companyId: req.companyId,
+            personal: {
+                firstName: employee.firstName,
+                lastName: employee.lastName || '',
+                fullName: personalDetails.fullName || `${employee.firstName} ${employee.lastName || ''}`.trim(),
+                dob: personalDetails.dateOfBirth || null,
+                gender: personalDetails.gender || null,
+                bloodGroup: personalDetails.bloodGroup || '',
+                nationality: 'Indian'
+            },
+            identity: {},
+            contact: {
+                personalEmail: personalDetails.personalEmail || employee.email,
+                mobileNumber: personalDetails.personalMobile || employee.phone || '',
+                emergencyNumber: emergencyContact.phoneNumber || '',
+                emergencyContact: {
+                    name: emergencyContact.contactName || '',
+                    relation: emergencyContact.relationship || '',
+                    phone: emergencyContact.phoneNumber || '',
+                },
+                addresses: personalDetails.currentAddress?.line1 ? [{
+                    type: 'Current',
+                    street: personalDetails.currentAddress.line1,
+                    addressLine2: personalDetails.currentAddress.line2 || '',
+                    city: personalDetails.currentAddress.city || '',
+                    state: personalDetails.currentAddress.state || '',
+                    zipCode: personalDetails.currentAddress.pincode || '',
+                    country: personalDetails.currentAddress.country || 'India'
+                }] : []
+            },
+            employment: {
+                designation: employee.designation || '',
+                department: employee.department || '',
+                joiningDate: employee.joiningDate || new Date(),
+                status: 'Active',
+                workLocation: employee.workLocation || 'Office',
+                employmentType: 'Full Time'
+            },
+            compensation: {
+                ctc: employee.salary?.annualCTC ? parseFloat(employee.salary.annualCTC) : null,
+                bankDetails: {
+                    accountNumber: bankDetails.accountNumber || '',
+                    ifscCode: bankDetails.ifscCode || '',
+                    bankName: bankDetails.bankName || '',
+                    accountHolderName: `${employee.firstName} ${employee.lastName || ''}`.trim(),
+                    branchAddress: bankDetails.branchName || ''
+                }
+            },
+            documents: dossierDocuments,
+            documentSubmissionStatus: dossierDocuments.length > 0 ? 'Submitted' : 'Draft'
+        });
+
+        await profile.save();
+
+        // Link profile to user
+        newUser.employeeProfile = profile._id;
+        await newUser.save();
+
+        // 3. Update onboarding record
+        employee.transferredToUserId = newUser._id;
+        employee.status = 'Reviewed';
+        employee.auditLog.push({
+            action: 'TRANSFERRED_TO_ACTIVE',
+            details: `Transferred to active employee (User: ${newUser._id}) by ${req.user.firstName || 'Admin'}`
+        });
+        await employee.save();
+
+        // 4. Send welcome email
+        const portalUrl = `${req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'}/login`;
+        await sendEmail({
+            to: employee.email,
+            subject: `Welcome! Your Employee Account is Ready`,
+            html: `
+                <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+                    <div style="background: linear-gradient(135deg, #059669, #10b981); padding: 32px; text-align: center;">
+                        <h1 style="color: white; margin: 0; font-size: 24px;">Welcome to the Team! 🎉</h1>
+                        <p style="color: #d1fae5; margin-top: 8px;">Your employee account has been activated</p>
+                    </div>
+                    <div style="padding: 32px;">
+                        <p>Hello <strong>${employee.firstName}</strong>,</p>
+                        <p>Congratulations! Your pre-onboarding has been completed and your employee account is now active.</p>
+                        
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 24px 0;">
+                            <p style="margin: 4px 0;"><strong>Employee Code:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${employeeCode || employee.tempEmployeeId}</code></p>
+                            <p style="margin: 4px 0;"><strong>Email:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${employee.email}</code></p>
+                            <p style="margin: 4px 0;"><strong>Temporary Password:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${userPassword}</code></p>
+                        </div>
+
+                        <div style="text-align: center; margin: 24px 0;">
+                            <a href="${portalUrl}" style="background: linear-gradient(135deg, #059669, #10b981); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; display: inline-block;">Login to Your Account</a>
+                        </div>
+                        
+                        <p style="color: #64748b; font-size: 13px;">⚠️ You will be asked to change your password on first login.</p>
+                    </div>
+                    <div style="background: #f1f5f9; padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">
+                        © ${new Date().getFullYear()} TalentCio. All rights reserved.
+                    </div>
+                </div>
+            `
+        });
+
+        res.status(201).json({
+            message: 'Employee transferred to active user successfully!',
+            user: {
+                _id: newUser._id,
+                firstName: newUser.firstName,
+                lastName: newUser.lastName,
+                email: newUser.email,
+                employeeCode: newUser.employeeCode
+            },
+            documentsTransferred: dossierDocuments.length,
+            tempPassword: userPassword
+        });
+
+    } catch (error) {
+        console.error('Error transferring to active employee:', error);
+        if (error.code === 11000) {
+            return res.status(400).json({ message: 'Duplicate entry. This employee may already exist.' });
+        }
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// ==========================================
+// Extension & Credential Regeneration Requests (Candidate Actions)
+// ==========================================
+
+exports.requestExtension = async (req, res) => {
+    try {
+        const { reason, requestedDays } = req.body;
+        const employeeId = req.onboardingEmployee._id;
+
+        if (!reason || !requestedDays) {
+            return res.status(400).json({ message: 'Reason and number of days are required' });
+        }
+
+        const employee = await OnboardingEmployee.findById(employeeId);
+        if (!employee) {
+            return res.status(404).json({ message: 'Employee not found' });
+        }
+
+        // Check if there is already a pending request
+        const hasPending = employee.extensionRequests.some(r => r.status === 'Pending');
+        if (hasPending) {
+            return res.status(400).json({ message: 'You already have a pending extension request' });
+        }
+
+        employee.extensionRequests.push({
+            reason,
+            requestedDays: Number(requestedDays),
+            status: 'Pending',
+            requestedAt: new Date()
+        });
+
+        // Audit log
+        employee.auditLog.push({
+            action: 'EXTENSION_REQUESTED',
+            details: `Requested ${requestedDays} days extension due to: ${reason}`,
+            ip: req.ip
+        });
+
+        await employee.save();
+        res.status(200).json({ message: 'Extension request submitted successfully' });
+    } catch (error) {
+        console.error('Error requesting extension:', error);
+        res.status(500).json({ message: 'Failed to request extension', error: error.message });
+    }
+};
+
+exports.requestCredentialRegeneration = async (req, res) => {
+    try {
+        const { tempEmployeeId, reason } = req.body;
+        
+        if (!tempEmployeeId) {
+            return res.status(400).json({ message: 'Employee ID is required' });
+        }
+
+        // Allow looking up without auth since they are locked out
+        const employee = await OnboardingEmployee.findOne({ tempEmployeeId });
+        if (!employee) {
+            return res.status(404).json({ message: 'Employee not found' });
+        }
+
+        if (employee.credentialRegenerationRequest?.requested && !employee.credentialRegenerationRequest?.resolved) {
+            return res.status(400).json({ message: 'You already have a pending request for new credentials' });
+        }
+
+        employee.credentialRegenerationRequest = {
+            requested: true,
+            requestedAt: new Date(),
+            reason: reason || 'Credentials expired or lost'
+        };
+
+        employee.auditLog.push({
+            action: 'REGENERATION_REQUESTED',
+            details: reason || 'Credentials expired or lost',
+            ip: req.ip
+        });
+
+        await employee.save();
+        res.status(200).json({ message: 'Request sent! HR will review and send new credentials to your email.' });
+    } catch (error) {
+        console.error('Error requesting credential regeneration:', error);
+        res.status(500).json({ message: 'Failed to request credentials', error: error.message });
+    }
+};
+
+exports.resolveExtensionRequest = async (req, res) => {
+    try {
+        const { id, extId } = req.params;
+        const { status, responseNote, newDeadline } = req.body;
+
+        const employee = await OnboardingEmployee.findOne({ _id: id, companyId: req.companyId });
+        if (!employee) return res.status(404).json({ message: 'Employee not found' });
+
+        const extReq = employee.extensionRequests.id(extId);
+        if (!extReq) return res.status(404).json({ message: 'Extension request not found' });
+
+        extReq.status = status;
+        extReq.respondedAt = new Date();
+        extReq.responseNote = responseNote || '';
+
+        let logDetail = `Extension request ${status}`;
+        if (status === 'Approved' && newDeadline) {
+            employee.documentDeadline = new Date(newDeadline);
+            logDetail += ` - New deadline: ${new Date(newDeadline).toLocaleDateString()}`;
+        }
+
+        employee.auditLog.push({
+            action: 'EXTENSION_RESOLVED',
+            details: logDetail,
+            ip: req.ip
+        });
+
+        await employee.save();
+        res.status(200).json({ message: `Extension request ${status.toLowerCase()} successfully`, employee });
+    } catch (error) {
+        console.error('Error resolving extension:', error);
+        res.status(500).json({ message: 'Failed to resolve extension', error: error.message });
+    }
+};
+

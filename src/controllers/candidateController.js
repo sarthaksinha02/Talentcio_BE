@@ -3,7 +3,10 @@ const { HiringRequest } = require('../models/HiringRequest');
 const { cloudinary } = require('../config/cloudinary');
 const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
 const mongoose = require('mongoose');
+const Company = require('../models/Company');
+const { sendEmail } = require('../services/emailService');
 const NotificationService = require('../services/notificationService');
+const OnboardingEmployee = require('../models/OnboardingEmployee');
 
 
 // Upload resume to Cloudinary
@@ -1073,5 +1076,127 @@ exports.deleteSkillRating = async (req, res) => {
     } catch (error) {
         console.error('Error deleting skill rating:', error);
         res.status(500).json({ message: 'Server error deleting skill rating', error: error.message });
+    }
+};
+
+// Transfer candidate to Onboarding module
+exports.transferToOnboarding = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
+            .populate('hiringRequestId');
+
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        // Validation: Ensure a Phase 3 decision is set
+        if (!candidate.phase3Decision || candidate.phase3Decision === 'None') {
+            return res.status(400).json({ message: 'A Phase 3 decision must be set before transferring to onboarding' });
+        }
+
+        if (candidate.isTransferredToOnboarding) {
+            return res.status(400).json({ message: 'Candidate is already transferred to onboarding' });
+        }
+
+        // Check if employee with same email already exists in onboarding
+        const existingOnboarding = await OnboardingEmployee.findOne({ email: candidate.email, companyId: req.companyId });
+        if (existingOnboarding) {
+            candidate.isTransferredToOnboarding = true; // Mark as transferred since they exist
+            await candidate.save();
+            return res.status(400).json({ message: 'An onboarding record with this email already exists' });
+        }
+
+
+        // Split name into first and last
+        const nameParts = candidate.candidateName.trim().split(/\s+/);
+        const firstName = nameParts[0];
+        const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
+        // Generate credentials
+        const tempEmployeeId = await OnboardingEmployee.generateTempId(req.companyId);
+        const tempPassword = Math.random().toString(36).slice(-8); // Random 8 char password
+
+        // Default document slots
+        const defaultDocuments = [
+            { type: 'resume', label: 'Updated Resume' },
+            { type: 'aadhaar_front', label: 'Aadhaar Card (Front)' },
+            { type: 'aadhaar_back', label: 'Aadhaar Card (Back)' },
+            { type: 'pan', label: 'PAN Card' },
+            { type: 'salary_slip', label: 'Salary Slip' },
+            { type: 'passport', label: 'Passport (Optional)' },
+            { type: '10th_marksheet', label: '10th Marksheet / Certificate' },
+            { type: '12th_marksheet', label: '12th Marksheet / Certificate' },
+            { type: 'graduation', label: 'Graduation Marksheet / Certificate' },
+            { type: 'relieving_letter', label: 'Previous Employer Relieving Letter' },
+            { type: 'experience_certificate', label: 'Experience Certificate' },
+            { type: 'passport_photo', label: 'Recent Passport-Size Photograph' }
+        ];
+
+        console.log('📄 Initializing onboarding documents:', defaultDocuments.length);
+
+        // Create onboarding employee
+        const onboardingEmployee = new OnboardingEmployee({
+            companyId: req.companyId,
+            createdBy: req.user._id,
+            sourcedFromTA: true,
+            tempEmployeeId,
+            tempPassword, // hashed in pre-save
+            firstName,
+            lastName,
+            email: candidate.email,
+            phone: candidate.mobile,
+            designation: candidate.hiringRequestId?.roleDetails?.positionName || '',
+            joiningDate: candidate.lastWorkingDay || null,
+            workLocation: candidate.preferredLocation || candidate.currentLocation || '',
+            salary: {
+                annualCTC: candidate.currentCTC?.toString() || ''
+            },
+            personalDetails: {
+                fullName: candidate.candidateName,
+                personalEmail: candidate.email,
+                personalMobile: candidate.mobile,
+                currentAddress: {
+                    line1: candidate.currentLocation || '',
+                    city: candidate.currentLocation || ''
+                }
+            },
+            status: 'Pending',
+            documents: defaultDocuments,
+            requestedSections: ['Personal Details', 'Emergency Contact', 'Bank Details', 'Offer Declaration'],
+            requestedDocuments: ['Updated Resume', 'PAN Card', 'Aadhaar Card (Front)', 'Aadhaar Card (Back)', 'Graduation Marksheet / Certificate', 'Salary Slip', 'Recent Passport-Size Photograph']
+        });
+
+        console.log('💾 Saving onboarding employee with documents:', onboardingEmployee.documents.length);
+        await onboardingEmployee.save();
+        console.log('✅ Onboarding employee saved successfully:', onboardingEmployee._id);
+
+        // Mark candidate as transferred
+        candidate.isTransferredToOnboarding = true;
+        await candidate.save();
+
+        // Add audit log to onboarding employee
+        try {
+            await OnboardingEmployee.findByIdAndUpdate(onboardingEmployee._id, {
+                $push: {
+                    auditLog: {
+                        action: 'TRANSFERRED_FROM_TA',
+                        details: 'Candidate successfully transferred from Talent Acquisition'
+                    }
+                }
+            });
+        } catch (logError) {
+            console.error('Failed to log transfer audit:', logError);
+        }
+
+        res.status(200).json({
+            message: 'Candidate successfully transferred to onboarding',
+            onboardingEmployeeId: onboardingEmployee._id
+        });
+
+    } catch (error) {
+        console.error('Error transferring to onboarding:', error);
+        res.status(500).json({ message: 'Server error during transfer', error: error.message });
     }
 };
