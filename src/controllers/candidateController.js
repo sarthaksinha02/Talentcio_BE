@@ -93,7 +93,8 @@ exports.createCandidate = async (req, res) => {
             status,
             remark,
             mustHaveSkills,
-            niceToHaveSkills
+            niceToHaveSkills,
+            interviewRounds
         } = req.body;
 
         // Verify hiring request exists
@@ -148,6 +149,7 @@ exports.createCandidate = async (req, res) => {
             remark,
             mustHaveSkills: mustHaveSkills || [],
             niceToHaveSkills: niceToHaveSkills || [],
+            interviewRounds: interviewRounds || [],
             statusHistory: [{
                 status: status || 'Interested',
                 changedBy: req.user._id,
@@ -211,6 +213,7 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
         const candidates = await Candidate.find({ ...query, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName')
             .sort({ uploadedAt: -1 })
             .lean();
 
@@ -263,6 +266,7 @@ exports.getShortlistedCandidates = async (req, res) => {
             .populate('uploadedBy', 'firstName lastName')
             .populate('hiringRequestId', 'requestId roleDetails')
             .populate('interviewRounds.assignedTo', 'firstName lastName') // only pull what is necessary
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName')
             .select('candidateName email mobile status decision uploadedAt interviewRounds profilePulledBy calledBy rate totalExperience currentCTC expectedCTC location expectedLocation pastExperience currentCompany')
             .sort({ uploadedAt: -1 })
             .skip(skip)
