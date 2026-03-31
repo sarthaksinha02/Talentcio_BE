@@ -7,6 +7,7 @@ const Company = require('../models/Company');
 const { sendEmail } = require('../services/emailService');
 const NotificationService = require('../services/notificationService');
 const OnboardingEmployee = require('../models/OnboardingEmployee');
+const CandidateSource = require('../models/CandidateSource');
 
 
 // Upload resume to Cloudinary
@@ -72,6 +73,8 @@ exports.createCandidate = async (req, res) => {
             source,
             referralName,
             profilePulledBy,
+            calledBy,
+            rate,
             currentCTC,
             expectedCTC,
             inHandOffer,
@@ -88,7 +91,9 @@ exports.createCandidate = async (req, res) => {
             noticePeriod,
             lastWorkingDay,
             status,
-            remark
+            remark,
+            mustHaveSkills,
+            niceToHaveSkills
         } = req.body;
 
         // Verify hiring request exists
@@ -122,6 +127,8 @@ exports.createCandidate = async (req, res) => {
             source,
             referralName,
             profilePulledBy,
+            calledBy,
+            rate,
             currentCTC,
             expectedCTC,
             inHandOffer: inHandOffer || false,
@@ -139,6 +146,8 @@ exports.createCandidate = async (req, res) => {
             lastWorkingDay,
             status: status || 'Interested',
             remark,
+            mustHaveSkills: mustHaveSkills || [],
+            niceToHaveSkills: niceToHaveSkills || [],
             statusHistory: [{
                 status: status || 'Interested',
                 changedBy: req.user._id,
@@ -254,7 +263,7 @@ exports.getShortlistedCandidates = async (req, res) => {
             .populate('uploadedBy', 'firstName lastName')
             .populate('hiringRequestId', 'requestId roleDetails')
             .populate('interviewRounds.assignedTo', 'firstName lastName') // only pull what is necessary
-            .select('candidateName email mobile status decision uploadedAt interviewRounds profilePulledBy totalExperience currentCTC expectedCTC location expectedLocation pastExperience currentCompany')
+            .select('candidateName email mobile status decision uploadedAt interviewRounds profilePulledBy calledBy rate totalExperience currentCTC expectedCTC location expectedLocation pastExperience currentCompany')
             .sort({ uploadedAt: -1 })
             .skip(skip)
             .limit(limit)
@@ -384,10 +393,11 @@ exports.updateCandidate = async (req, res) => {
         // Update fields securely (prevent mass assignment)
         const allowedUpdates = [
             'candidateName', 'email', 'mobile', 'source', 'referralName',
-            'profilePulledBy', 'currentCTC', 'expectedCTC', 'inHandOffer', 'offerCompany', 'offerCTC',
+            'profilePulledBy', 'calledBy', 'rate', 'currentCTC', 'expectedCTC', 'inHandOffer', 'offerCompany', 'offerCTC',
             'preference', 'totalExperience', 'qualification', 'currentCompany', 'pastExperience',
             'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod',
-            'status', 'remark', 'decision', 'phase2Decision', 'phase3Decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId'
+            'status', 'remark', 'decision', 'phase2Decision', 'phase3Decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId',
+            'mustHaveSkills', 'niceToHaveSkills'
         ];
 
         allowedUpdates.forEach(field => {
@@ -639,17 +649,92 @@ exports.updatePhase3Decision = async (req, res) => {
     }
 };
 
-// Get distinct candidate sources
+// Get distinct candidate sources + stored custom sources
 exports.getCandidateSources = async (req, res) => {
     try {
-        const sources = await Candidate.distinct('source', { companyId: req.companyId });
-        // Ensure default sources are included if not present in DB
-        const defaultSources = ['Job Portal', 'Referral'];
-        const allSources = [...new Set([...defaultSources, ...sources])];
+        // 1. Get sources from actual candidates
+        const existingSources = await Candidate.distinct('source', { companyId: req.companyId });
+        
+        // 2. Get sources from CandidateSource master data
+        const masterSources = await CandidateSource.find({ companyId: req.companyId });
+        
+        const defaultSources = ['Job Portal', 'Referral', 'LinkedIn', 'Consultancy', 'Internal Database', 'Other'];
+        
+        // Format master sources to include ID for deletion
+        const customSources = masterSources.map(s => ({
+            _id: s._id,
+            name: s.name,
+            isCustom: true
+        }));
 
-        res.status(200).json(allSources.sort());
+        // Combine all and return as objects to differentiate custom ones
+        const combined = [...defaultSources.map(s => ({ name: s, isCustom: false }))];
+        
+        // Add existing from candidates if not in default
+        existingSources.forEach(s => {
+            if (!combined.some(c => c.name === s)) {
+                combined.push({ name: s, isCustom: false });
+            }
+        });
+
+        // Add custom from master data
+        customSources.forEach(s => {
+            if (!combined.some(c => c.name === s.name)) {
+                combined.push(s);
+            } else {
+                // If already there but we have a custom record, mark it as custom
+                const index = combined.findIndex(c => c.name === s.name);
+                combined[index] = s;
+            }
+        });
+
+        res.status(200).json(combined.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (error) {
         console.error('Error fetching sources:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Add a new custom candidate source
+exports.addCandidateSource = async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) {
+            return res.status(400).json({ message: 'Source name is required' });
+        }
+
+        const existing = await CandidateSource.findOne({ name, companyId: req.companyId });
+        if (existing) {
+            return res.status(400).json({ message: 'Source already exists' });
+        }
+
+        const newSource = new CandidateSource({
+            name,
+            companyId: req.companyId,
+            createdBy: req.user._id
+        });
+
+        await newSource.save();
+        res.status(201).json({ message: 'Source added successfully', source: newSource });
+    } catch (error) {
+        console.error('Error adding source:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Delete a custom candidate source
+exports.deleteCandidateSource = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const source = await CandidateSource.findOneAndDelete({ _id: id, companyId: req.companyId });
+        
+        if (!source) {
+            return res.status(404).json({ message: 'Source not found' });
+        }
+
+        res.status(200).json({ message: 'Source deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting source:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect, admin } = require('../middlewares/authMiddleware');
+const { authorize } = require('../middlewares/authorize');
 const { upload } = require('../config/cloudinary');
 const onboardingController = require('../controllers/onboardingController');
 const OnboardingEmployee = require('../models/OnboardingEmployee');
@@ -47,33 +48,35 @@ const protectOnboarding = async (req, res, next) => {
 // ==========================================
 // HR ADMIN ROUTES (Protected + Admin)
 // ==========================================
-router.post('/employees', protect, admin, onboardingController.addEmployee);
-router.post('/employees/bulk', protect, admin, onboardingController.bulkAddEmployees);
-router.get('/employees', protect, admin, onboardingController.getOnboardingList);
-router.get('/employees/:id', protect, admin, onboardingController.getOnboardingEmployee);
-router.patch('/employees/:id', protect, admin, onboardingController.updateEmployee);
-router.post('/employees/:id/regenerate-credentials', protect, admin, onboardingController.regenerateCredentials);
-router.post('/employees/:id/send-onboarding-email', protect, admin, onboardingController.sendPreOnboardingEmail);
-router.patch('/employees/:id/documents/:docId/flag', protect, admin, onboardingController.flagDocument);
-router.patch('/employees/:id/documents/:docId/approve', protect, admin, onboardingController.approveDocument);
-router.post('/employees/:id/extension/:extId/resolve', protect, admin, onboardingController.resolveExtensionRequest);
-router.get('/employees/:id/download', protect, admin, onboardingController.downloadAllDocuments);
-router.get('/employees/:id/offer-letter', protect, admin, onboardingController.generateOfferLetter);
-router.get('/employees/:id/declaration', protect, admin, onboardingController.generateDeclaration);
-router.post('/employees/:id/transfer-to-active', protect, admin, onboardingController.transferToActiveEmployee);
+const requireOnboarding = authorize('onboarding.manage');
+
+router.post('/employees', protect, requireOnboarding, onboardingController.addEmployee);
+router.post('/employees/bulk', protect, requireOnboarding, onboardingController.bulkAddEmployees);
+router.get('/employees', protect, requireOnboarding, onboardingController.getOnboardingList);
+router.get('/employees/:id', protect, requireOnboarding, onboardingController.getOnboardingEmployee);
+router.patch('/employees/:id', protect, requireOnboarding, onboardingController.updateEmployee);
+router.post('/employees/:id/regenerate-credentials', protect, requireOnboarding, onboardingController.regenerateCredentials);
+router.post('/employees/:id/send-onboarding-email', protect, requireOnboarding, onboardingController.sendPreOnboardingEmail);
+router.patch('/employees/:id/documents/:docId/flag', protect, requireOnboarding, onboardingController.flagDocument);
+router.patch('/employees/:id/documents/:docId/approve', protect, requireOnboarding, onboardingController.approveDocument);
+router.post('/employees/:id/extension/:extId/resolve', protect, requireOnboarding, onboardingController.resolveExtensionRequest);
+router.get('/employees/:id/download', protect, requireOnboarding, onboardingController.downloadAllDocuments);
+router.get('/employees/:id/offer-letter', protect, requireOnboarding, onboardingController.generateOfferLetter);
+router.get('/employees/:id/declaration', protect, requireOnboarding, onboardingController.generateDeclaration);
+router.post('/employees/:id/transfer-to-active', protect, requireOnboarding, onboardingController.transferToActiveEmployee);
 
 // --- Settings & Templates ---
-router.get('/settings', protect, admin, onboardingController.getOnboardingSettings);
-router.post('/settings/templates', protect, admin, onboardingController.updateTemplate);
-router.post('/settings/templates/upload', protect, admin, upload.single('document'), onboardingController.uploadAndSetTemplate);
-router.post('/settings/templates/dynamic/upload', protect, admin, upload.single('document'), onboardingController.addDynamicTemplate);
-router.delete('/settings/templates/dynamic/:templateId', protect, admin, onboardingController.deleteDynamicTemplate);
-router.get('/settings/templates/:type/preview', protect, admin, onboardingController.getTemplatePreview);
-router.get('/settings/templates/:type/download', protect, admin, onboardingController.downloadTemplate);
+router.get('/settings', protect, requireOnboarding, onboardingController.getOnboardingSettings);
+router.post('/settings/templates', protect, requireOnboarding, onboardingController.updateTemplate);
+router.post('/settings/templates/upload', protect, requireOnboarding, upload.single('document'), onboardingController.uploadAndSetTemplate);
+router.post('/settings/templates/dynamic/upload', protect, requireOnboarding, upload.single('document'), onboardingController.addDynamicTemplate);
+router.delete('/settings/templates/dynamic/:templateId', protect, requireOnboarding, onboardingController.deleteDynamicTemplate);
+router.get('/settings/templates/:type/preview', protect, requireOnboarding, onboardingController.getTemplatePreview);
+router.get('/settings/templates/:type/download', protect, requireOnboarding, onboardingController.downloadTemplate);
 
 // --- Policies ---
-router.post('/settings/policies/upload', protect, admin, upload.single('document'), onboardingController.addPolicy);
-router.delete('/settings/policies/:policyId', protect, admin, onboardingController.deletePolicy);
+router.post('/settings/policies/upload', protect, requireOnboarding, upload.single('document'), onboardingController.addPolicy);
+router.delete('/settings/policies/:policyId', protect, requireOnboarding, onboardingController.deletePolicy);
 
 // ==========================================
 // EMPLOYEE SELF-SERVICE ROUTES (Public / Onboarding Token)

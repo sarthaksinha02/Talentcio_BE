@@ -59,6 +59,14 @@ const candidateSchema = new mongoose.Schema({
         type: String,
         trim: true
     },
+    calledBy: {
+        type: String,
+        trim: true
+    },
+    rate: {
+        type: Number,
+        min: 0
+    },
     referralName: {
         type: String,
         trim: true
@@ -118,6 +126,14 @@ const candidateSchema = new mongoose.Schema({
             type: String,
             trim: true
         }
+    }],
+    mustHaveSkills: [{
+        skill: { type: String },
+        experience: { type: Number, min: 0 }
+    }],
+    niceToHaveSkills: [{
+        skill: { type: String },
+        experience: { type: Number, min: 0 }
     }],
 
     // Location Details

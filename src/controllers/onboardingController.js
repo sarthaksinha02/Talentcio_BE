@@ -81,51 +81,17 @@ exports.addEmployee = async (req, res) => {
             documents: defaultDocuments,
             companyId: req.companyId,
             createdBy: req.user._id,
-            requestedSections: ['Personal Details', 'Emergency Contact', 'Bank Details', 'Offer Declaration'],
-            requestedDocuments: defaultDocuments.map(d => d.label),
+            requestedSections: [],
+            requestedDocuments: [],
             auditLog: [{ action: 'CREATED', details: `Created by ${req.user.firstName || 'Admin'}` }]
         });
 
         await employee.save();
 
-        // Send credentials via email
-        const portalUrl = `${req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'}/pre-onboarding/login`;
-        const deadlineStr = documentDeadline ? new Date(documentDeadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Not specified';
-
-        await sendEmail({
-            to: email,
-            subject: `Welcome to the Team! Your Pre-Onboarding Portal Access - ${tempEmployeeId}`,
-            html: `
-                <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
-                    <div style="background: linear-gradient(135deg, #2563eb, #7c3aed); padding: 32px; text-align: center;">
-                        <h1 style="color: white; margin: 0; font-size: 24px;">Welcome Aboard! 🎉</h1>
-                        <p style="color: #e0e7ff; margin-top: 8px;">Your pre-onboarding portal is ready</p>
-                    </div>
-                    <div style="padding: 32px;">
-                        <p>Hello <strong>${firstName}</strong>,</p>
-                        <p>We're excited to have you join us! Please use the credentials below to log in to your Pre-Onboarding Portal and complete your profile before your joining date.</p>
-                        
-                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 24px 0;">
-                            <p style="margin: 4px 0;"><strong>Employee ID:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${tempEmployeeId}</code></p>
-                            <p style="margin: 4px 0;"><strong>Temporary Password:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${rawPassword}</code></p>
-                            <p style="margin: 4px 0;"><strong>Submission Deadline:</strong> ${deadlineStr}</p>
-                        </div>
-
-                        <div style="text-align: center; margin: 24px 0;">
-                            <a href="${portalUrl}" style="background: linear-gradient(135deg, #2563eb, #7c3aed); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; display: inline-block;">Open Pre-Onboarding Portal</a>
-                        </div>
-
-                        <p style="color: #64748b; font-size: 13px;">⚠️ You will be asked to change your password on first login. Please keep your credentials confidential.</p>
-                    </div>
-                    <div style="background: #f1f5f9; padding: 16px; text-align: center; color: #94a3b8; font-size: 12px;">
-                        © ${new Date().getFullYear()} TalentCio. All rights reserved.
-                    </div>
-                </div>
-            `
-        });
+        // Email sending removed. Email will be sent when HR triggers "Send Pre-Onboarding Email" with selected sections.
 
         res.status(201).json({
-            message: 'Onboarding employee added successfully. Credentials sent via email.',
+            message: 'Onboarding employee added successfully.',
             employee: {
                 _id: employee._id,
                 tempEmployeeId: employee.tempEmployeeId,
@@ -354,13 +320,7 @@ exports.bulkAddEmployees = async (req, res) => {
 
                 await employee.save();
 
-                // Send email
-                const portalUrl = `${req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'}/pre-onboarding/login`;
-                await sendEmail({
-                    to: emp.email,
-                    subject: `Welcome! Your Pre-Onboarding Portal Access - ${tempEmployeeId}`,
-                    html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e0e0e0;border-radius:10px;"><h2 style="color:#2563eb;">Welcome Aboard, ${emp.firstName}!</h2><p>Your Employee ID: <strong>${tempEmployeeId}</strong></p><p>Your Temporary Password: <strong>${rawPassword}</strong></p><p><a href="${portalUrl}">Click here to login</a></p><p style="color:#666;font-size:13px;">You will be required to change your password on first login.</p></div>`
-                });
+                // Email sending removed. Email will be sent via "Send Pre-Onboarding Email" action.
 
                 results.push({ email: emp.email, tempEmployeeId, status: 'Created' });
             } catch (innerErr) {
@@ -510,51 +470,10 @@ exports.regenerateCredentials = async (req, res) => {
 
         await employee.save();
 
-        // Send notification email to the employee
-        const portalUrl = `${req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173'}/pre-onboarding/login`;
-        
-        await sendEmail({
-            to: employee.email,
-            subject: `Action Required: Your Portal Credentials have been Updated`,
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b; line-height: 1.6;">
-                    <div style="text-align: center; margin-bottom: 24px;">
-                        <h2 style="color: #2563eb; margin: 0;">Credentials Updated</h2>
-                        <p style="color: #64748b; font-size: 14px;">Pre-Onboarding Portal Access</p>
-                    </div>
-                    
-                    <p>Hello <strong>${employee.firstName}</strong>,</p>
-                    <p>Your login credentials for the Pre-Onboarding Portal have been updated by the HR administrator. Please use the new temporary password provided below to access your account.</p>
-                    
-                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 24px 0;">
-                        <p style="margin: 4px 0; font-size: 14px;"><strong>Employee ID:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${employee.tempEmployeeId}</code></p>
-                        <p style="margin: 4px 0; font-size: 14px;"><strong>New Temporary Password:</strong> <code style="background: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 16px;">${newPassword}</code></p>
-                        <p style="margin: 12px 0 0; font-size: 13px; color: #dc2626;"><strong>⏳ Credentials Expire On:</strong> ${expiry.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                    </div>
-
-                    ${employee.documentDeadline ? `
-                    <div style="border-left: 4px solid #f59e0b; padding: 12px 16px; background: #fffbeb; margin-bottom: 24px;">
-                        <p style="margin: 0; font-size: 14px; color: #92400e;"><strong>📅 Document Submission Deadline:</strong> ${new Date(employee.documentDeadline).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                    </div>
-                    ` : ''}
-
-                    <div style="text-align: center; margin: 32px 0;">
-                        <a href="${portalUrl}" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 600; display: inline-block;">Login to Portal</a>
-                    </div>
-
-                    <p style="font-size: 13px; color: #64748b; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
-                        <strong>Important Security Note:</strong> You will be required to change this temporary password upon your next login. Please keep these credentials secure and do not share them.
-                    </p>
-                    
-                    <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-top: 24px;">
-                        This is an automated message. Please do not reply to this email.
-                    </p>
-                </div>
-            `
-        });
+        // Email logic removed per requirements; credentials will be sent when 'Send Pre-Onboarding Email' is triggered.
         
         res.status(200).json({ 
-            message: 'Credentials regenerated and email sent successfully', 
+            message: 'Credentials regenerated successfully.',  
             tempEmployeeId: employee.tempEmployeeId,
             tempPassword: newPassword,
             expiry
@@ -670,7 +589,8 @@ exports.downloadAllDocuments = async (req, res) => {
         if (employee.bankDetails?.cancelledChequeUrl) {
             try {
                 const response = await axios.get(employee.bankDetails.cancelledChequeUrl, { responseType: 'stream' });
-                archive.append(response.data, { name: 'Cancelled_Cheque.pdf' });
+                const ext = employee.bankDetails.cancelledChequeUrl.split('.').pop().split('?')[0] || 'pdf';
+                archive.append(response.data, { name: `Cancelled_Cheque.${ext}` });
             } catch (e) { /* skip */ }
         }
 
@@ -695,8 +615,31 @@ exports.employeeLogin = async (req, res) => {
             return res.status(400).json({ message: 'Employee ID and password are required' });
         }
 
-        // Find across all companies (employee may not know their company)
-        const employee = await OnboardingEmployee.findOne({ tempEmployeeId });
+        // Fetch the corresponding company if the frontend provides a tenant ID
+        let query = { tempEmployeeId };
+        const tenantId = req.headers['x-tenant-id'];
+        
+        if (tenantId) {
+            const company = await Company.findOne({ tenantId });
+            if (company) {
+                query.companyId = company._id;
+            }
+        }
+
+        const employees = await OnboardingEmployee.find(query);
+        if (employees.length === 0) {
+            return res.status(401).json({ message: 'Invalid credentials' });
+        }
+
+        let employee = null;
+        for (let emp of employees) {
+            const isMatch = await emp.matchPassword(password);
+            if (isMatch) {
+                employee = emp;
+                break;
+            }
+        }
+
         if (!employee) {
             return res.status(401).json({ message: 'Invalid credentials' });
         }

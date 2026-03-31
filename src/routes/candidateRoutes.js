@@ -17,6 +17,8 @@ router.post('/upload-resume/:hiringRequestId', protect, authorize('ta.create'), 
 // Get discrete sources
 router.get('/user/:userName', protect, authorize('ta.view'), candidateController.getCandidatesByPulledBy);
 router.get('/sources', protect, authorize('ta.view'), candidateController.getCandidateSources);
+router.post('/sources', protect, authorize('ta.create'), candidateController.addCandidateSource);
+router.delete('/sources/:id', protect, authorize('ta.delete'), candidateController.deleteCandidateSource);
 
 // CRUD operations
 router.post('/', protect, authorize('ta.create'), candidateController.createCandidate);

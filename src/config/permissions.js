@@ -275,5 +275,12 @@ module.exports = [
         key: "discussion.create",
         module: "DISCUSSION",
         description: "Create discussions"
+    },
+
+    // ONBOARDING
+    {
+        key: "onboarding.manage",
+        module: "ONBOARDING",
+        description: "Manage onboarding candidates and details"
     }
 ];
