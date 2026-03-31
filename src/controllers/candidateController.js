@@ -103,20 +103,113 @@ exports.createCandidate = async (req, res) => {
             return res.status(404).json({ message: 'Hiring request not found' });
         }
 
-        // Check for duplicate email in same hiring request
-        const existingByEmail = await Candidate.findOne({ hiringRequestId, email, companyId: req.companyId });
-        if (existingByEmail) {
-            return res.status(400).json({ message: 'A candidate with this email is already added to this hiring request' });
+        // Check for duplicate email or mobile in same hiring request
+        let candidate = await Candidate.findOne({ 
+            hiringRequestId, 
+            $or: [{ email: email.toLowerCase().trim() }, { mobile: mobile.trim() }],
+            companyId: req.companyId 
+        });
+
+        if (candidate) {
+            // Update mode
+            console.log('🔄 Existing candidate found, updating fields...');
+            
+            // Track status change for history
+            const statusChanged = status && candidate.status !== status;
+            
+            const updatedFields = [];
+            const compareAndUpdate = (field, newValue, label) => {
+                if (newValue !== undefined && newValue !== null && newValue !== '' && candidate[field] !== newValue) {
+                    candidate[field] = newValue;
+                    updatedFields.push(label || field);
+                }
+            };
+
+            compareAndUpdate('candidateName', candidateName, 'Name');
+            compareAndUpdate('source', source, 'Source');
+            compareAndUpdate('profilePulledBy', profilePulledBy, 'Pulled By');
+            compareAndUpdate('calledBy', calledBy, 'Called By');
+            compareAndUpdate('rate', rate, 'Rate');
+            compareAndUpdate('currentCTC', currentCTC, 'Current CTC');
+            compareAndUpdate('expectedCTC', expectedCTC, 'Expected CTC');
+            compareAndUpdate('inHandOffer', inHandOffer, 'Offer in Hand');
+            compareAndUpdate('offerCompany', offerCompany, 'Offer Company');
+            compareAndUpdate('offerCTC', offerCTC, 'Offer CTC');
+            compareAndUpdate('totalExperience', totalExperience, 'Experience');
+            compareAndUpdate('qualification', qualification, 'Qualification');
+            compareAndUpdate('currentCompany', currentCompany, 'Company');
+            compareAndUpdate('currentLocation', currentLocation, 'Location');
+            compareAndUpdate('preferredLocation', preferredLocation, 'Preferred Location');
+            compareAndUpdate('tatToJoin', tatToJoin, 'TAT Join');
+            compareAndUpdate('noticePeriod', noticePeriod, 'Notice Period');
+            compareAndUpdate('lastWorkingDay', lastWorkingDay, 'DOJ/LWD');
+            compareAndUpdate('status', status, 'Status');
+            compareAndUpdate('remark', remark, 'Remark');
+            
+            if (mustHaveSkills && Array.isArray(mustHaveSkills)) {
+                const existingSkills = candidate.mustHaveSkills || [];
+                const skillsChanged = existingSkills.length !== mustHaveSkills.length || 
+                    mustHaveSkills.some((s, idx) => 
+                        !existingSkills[idx] || 
+                        existingSkills[idx].skill !== s.skill || 
+                        existingSkills[idx].experience !== s.experience
+                    );
+
+                if (skillsChanged) {
+                    candidate.mustHaveSkills = mustHaveSkills;
+                    updatedFields.push('Skills');
+                }
+            }
+            if (niceToHaveSkills && Array.isArray(niceToHaveSkills)) {
+                candidate.niceToHaveSkills = niceToHaveSkills;
+            }
+            if (interviewRounds && Array.isArray(interviewRounds)) {
+                const existingRounds = candidate.interviewRounds || [];
+                const roundsChanged = existingRounds.length !== interviewRounds.length || 
+                    interviewRounds.some((r, idx) => {
+                        const er = existingRounds[idx];
+                        if (!er) return true;
+                        return er.levelName !== r.levelName || 
+                               er.status !== r.status || 
+                               er.remarks !== r.remarks || 
+                               er.feedback !== r.feedback ||
+                               er.rating !== r.rating ||
+                               er.evaluatedBy?.toString() !== r.evaluatedBy?.toString();
+                    });
+
+                if (roundsChanged) {
+                    candidate.interviewRounds = interviewRounds;
+                    updatedFields.push('Interview History');
+                }
+            }
+
+            if (statusChanged) {
+                candidate.statusHistory.push({
+                    status: status,
+                    changedBy: req.user._id,
+                    changedAt: new Date(),
+                    remark: `Updated via Bulk Import: ${remark || ''}`
+                });
+            }
+
+            await candidate.save();
+
+            const populatedUpdate = await Candidate.findOne({ _id: candidate._id, companyId: req.companyId })
+                .populate('uploadedBy', 'firstName lastName email')
+                .populate('hiringRequestId', 'requestId roleDetails')
+                .populate('interviewRounds.assignedTo', 'firstName lastName email')
+                .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+
+            return res.status(200).json({ 
+                message: 'Candidate updated successfully', 
+                candidate: populatedUpdate, 
+                isUpdate: true,
+                updatedFields 
+            });
         }
 
-        // Check for duplicate mobile in same hiring request
-        const existingByMobile = await Candidate.findOne({ hiringRequestId, mobile, companyId: req.companyId });
-        if (existingByMobile) {
-            return res.status(400).json({ message: 'A candidate with this mobile number is already added to this hiring request' });
-        }
-
-        // Create candidate
-        const candidate = new Candidate({
+        // Create mode (original logic continue)
+        candidate = new Candidate({
             companyId: req.companyId,
             hiringRequestId,
             resumeUrl,
@@ -162,11 +255,14 @@ exports.createCandidate = async (req, res) => {
 
         const populatedCandidate = await Candidate.findOne({ _id: candidate._id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
-            .populate('hiringRequestId', 'requestId roleDetails');
+            .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('interviewRounds.assignedTo', 'firstName lastName email')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName');
 
-        res.status(201).json({
-            message: 'Candidate created successfully',
-            candidate: populatedCandidate
+        res.status(201).json({ 
+            message: 'Candidate created successfully', 
+            candidate: populatedCandidate,
+            isUpdate: false
         });
 
     } catch (error) {
@@ -213,6 +309,7 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
         const candidates = await Candidate.find({ ...query, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName')
             .sort({ uploadedAt: -1 })
             .lean();
