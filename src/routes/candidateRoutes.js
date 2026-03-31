@@ -6,6 +6,8 @@ const candidateController = require('../controllers/candidateController');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/authorize');
 const { upload } = require('../config/cloudinary');
+const multer = require('multer');
+const memoryUpload = multer({ storage: multer.memoryStorage() });
 
 router.use(protect);
 router.use(requireModule('talentAcquisition'));
@@ -13,6 +15,9 @@ router.use(requireModule('talentAcquisition'));
 
 // Upload resume
 router.post('/upload-resume/:hiringRequestId', protect, authorize('ta.create'), upload.single('resume'), candidateController.uploadResume);
+
+// Parse resume without uploading to Cloudinary
+router.post('/parse-resume', protect, authorize('ta.create'), memoryUpload.single('resume'), candidateController.parseResume);
 
 // Get discrete sources
 router.get('/user/:userName', protect, authorize('ta.view'), candidateController.getCandidatesByPulledBy);

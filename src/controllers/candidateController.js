@@ -8,6 +8,7 @@ const { sendEmail } = require('../services/emailService');
 const NotificationService = require('../services/notificationService');
 const OnboardingEmployee = require('../models/OnboardingEmployee');
 const CandidateSource = require('../models/CandidateSource');
+const { parseCV } = require('../utils/cvParser');
 
 
 // Upload resume to Cloudinary
@@ -60,6 +61,29 @@ exports.uploadResume = async (req, res) => {
     }
 };
 
+// Parse resume without saving to DB
+exports.parseResume = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No resume file uploaded' });
+        }
+
+        const fileBuffer = req.file.buffer;
+        const fileType = req.file.mimetype;
+
+        const parsedData = await parseCV(fileBuffer, fileType);
+
+        res.status(200).json({
+            message: 'Resume parsed successfully',
+            data: parsedData
+        });
+
+    } catch (error) {
+        console.error('Error parsing resume:', error);
+        res.status(500).json({ message: 'Failed to parse resume', error: error.message });
+    }
+};
+
 // Create new candidate
 exports.createCandidate = async (req, res) => {
     try {
@@ -104,19 +128,19 @@ exports.createCandidate = async (req, res) => {
         }
 
         // Check for duplicate email or mobile in same hiring request
-        let candidate = await Candidate.findOne({ 
-            hiringRequestId, 
+        let candidate = await Candidate.findOne({
+            hiringRequestId,
             $or: [{ email: email.toLowerCase().trim() }, { mobile: mobile.trim() }],
-            companyId: req.companyId 
+            companyId: req.companyId
         });
 
         if (candidate) {
             // Update mode
             console.log('🔄 Existing candidate found, updating fields...');
-            
+
             // Track status change for history
             const statusChanged = status && candidate.status !== status;
-            
+
             const updatedFields = [];
             const compareAndUpdate = (field, newValue, label) => {
                 if (newValue !== undefined && newValue !== null && newValue !== '' && candidate[field] !== newValue) {
@@ -145,13 +169,13 @@ exports.createCandidate = async (req, res) => {
             compareAndUpdate('lastWorkingDay', lastWorkingDay, 'DOJ/LWD');
             compareAndUpdate('status', status, 'Status');
             compareAndUpdate('remark', remark, 'Remark');
-            
+
             if (mustHaveSkills && Array.isArray(mustHaveSkills)) {
                 const existingSkills = candidate.mustHaveSkills || [];
-                const skillsChanged = existingSkills.length !== mustHaveSkills.length || 
-                    mustHaveSkills.some((s, idx) => 
-                        !existingSkills[idx] || 
-                        existingSkills[idx].skill !== s.skill || 
+                const skillsChanged = existingSkills.length !== mustHaveSkills.length ||
+                    mustHaveSkills.some((s, idx) =>
+                        !existingSkills[idx] ||
+                        existingSkills[idx].skill !== s.skill ||
                         existingSkills[idx].experience !== s.experience
                     );
 
@@ -165,16 +189,16 @@ exports.createCandidate = async (req, res) => {
             }
             if (interviewRounds && Array.isArray(interviewRounds)) {
                 const existingRounds = candidate.interviewRounds || [];
-                const roundsChanged = existingRounds.length !== interviewRounds.length || 
+                const roundsChanged = existingRounds.length !== interviewRounds.length ||
                     interviewRounds.some((r, idx) => {
                         const er = existingRounds[idx];
                         if (!er) return true;
-                        return er.levelName !== r.levelName || 
-                               er.status !== r.status || 
-                               er.remarks !== r.remarks || 
-                               er.feedback !== r.feedback ||
-                               er.rating !== r.rating ||
-                               er.evaluatedBy?.toString() !== r.evaluatedBy?.toString();
+                        return er.levelName !== r.levelName ||
+                            er.status !== r.status ||
+                            er.remarks !== r.remarks ||
+                            er.feedback !== r.feedback ||
+                            er.rating !== r.rating ||
+                            er.evaluatedBy?.toString() !== r.evaluatedBy?.toString();
                     });
 
                 if (roundsChanged) {
@@ -200,11 +224,11 @@ exports.createCandidate = async (req, res) => {
                 .populate('interviewRounds.assignedTo', 'firstName lastName email')
                 .populate('interviewRounds.evaluatedBy', 'firstName lastName');
 
-            return res.status(200).json({ 
-                message: 'Candidate updated successfully', 
-                candidate: populatedUpdate, 
+            return res.status(200).json({
+                message: 'Candidate updated successfully',
+                candidate: populatedUpdate,
                 isUpdate: true,
-                updatedFields 
+                updatedFields
             });
         }
 
@@ -259,8 +283,8 @@ exports.createCandidate = async (req, res) => {
             .populate('interviewRounds.assignedTo', 'firstName lastName email')
             .populate('interviewRounds.evaluatedBy', 'firstName lastName');
 
-        res.status(201).json({ 
-            message: 'Candidate created successfully', 
+        res.status(201).json({
+            message: 'Candidate created successfully',
             candidate: populatedCandidate,
             isUpdate: false
         });
@@ -755,12 +779,12 @@ exports.getCandidateSources = async (req, res) => {
     try {
         // 1. Get sources from actual candidates
         const existingSources = await Candidate.distinct('source', { companyId: req.companyId });
-        
+
         // 2. Get sources from CandidateSource master data
         const masterSources = await CandidateSource.find({ companyId: req.companyId });
-        
+
         const defaultSources = ['Job Portal', 'Referral', 'LinkedIn', 'Consultancy', 'Internal Database', 'Other'];
-        
+
         // Format master sources to include ID for deletion
         const customSources = masterSources.map(s => ({
             _id: s._id,
@@ -770,7 +794,7 @@ exports.getCandidateSources = async (req, res) => {
 
         // Combine all and return as objects to differentiate custom ones
         const combined = [...defaultSources.map(s => ({ name: s, isCustom: false }))];
-        
+
         // Add existing from candidates if not in default
         existingSources.forEach(s => {
             if (!combined.some(c => c.name === s)) {
@@ -828,7 +852,7 @@ exports.deleteCandidateSource = async (req, res) => {
     try {
         const { id } = req.params;
         const source = await CandidateSource.findOneAndDelete({ _id: id, companyId: req.companyId });
-        
+
         if (!source) {
             return res.status(404).json({ message: 'Source not found' });
         }
