@@ -55,26 +55,35 @@ async function parseCV(fileBuffer, fileType) {
     // 4. Skills Extraction (Keyword Matching)
     const skillsDictionary = [
         // Frontend
-        'React', 'Next.js', 'Node.js', 'Express', 'JavaScript', 'TypeScript', 'Angular', 'Vue.js', 'Svelte',
-        'HTML', 'CSS', 'Tailwind', 'SASS', 'SCSS', 'Bootstrap', 'Redux', 'Zustand', 'Context API', 'GraphQL',
-        'Vite', 'Webpack', 'Babel', 'Figma', 'Adobe XD', 'UI', 'UX',
+        'React', 'Next.js', 'Node.js', 'Express', 'JavaScript', 'JS', 'TypeScript', 'TS', 'Angular', 'Vue.js', 'Svelte',
+        'HTML', 'HTML5', 'CSS', 'CSS3', 'Tailwind', 'TailwindCSS', 'SASS', 'SCSS', 'Bootstrap', 'Redux', 'Zustand', 'Context API', 'GraphQL',
+        'Vite', 'Webpack', 'Babel', 'Figma', 'Adobe XD', 'UI', 'UX', 'Responsive Design', 'Material UI', 'Ant Design', 'Chakra UI',
         // Backend & Languages
-        'Python', 'Java', 'C++', 'C#', 'PHP', 'Ruby', 'Ruby on Rails', 'Golang', 'Rust', 'Scala', 'Kotlin', 'Swift',
-        'Spring Boot', 'Django', 'Flask', 'NestJS', 'Laravel', 'ASP.NET', 'Koa', 'Strapi',
+        'Python', 'Java', 'C++', 'C#', 'PHP', 'Ruby', 'Ruby on Rails', 'Golang', 'Go Language', 'Rust', 'Scala', 'Kotlin', 'Swift',
+        'Spring Boot', 'Django', 'Flask', 'NestJS', 'Laravel', 'ASP.NET', 'Koa', 'Strapi', 'FastAPI', 'Microservices', 'Serverless',
         // Databases
-        'PostgreSQL', 'MongoDB', 'MySQL', 'Redis', 'Oracle', 'SQLite', 'MariaDB', 'Firebase', 'Cassandra',
+        'PostgreSQL', 'MongoDB', 'MySQL', 'Redis', 'Oracle', 'SQLite', 'MariaDB', 'Firebase', 'Cassandra', 'DynamoDB', 'Elasticsearch', 'Mongoose',
         // Cloud & DevOps
-        'AWS', 'Azure', 'GCP', 'Google Cloud', 'Docker', 'Kubernetes', 'Jenkins', 'Terraform', 'Ansible', 
-        'CI/CD', 'Git', 'GitHub', 'GitLab', 'Bitbucket', 'DevOps', 'Heroku', 'Vercel', 'Netlify',
+        'AWS', 'Azure', 'GCP', 'Google Cloud', 'Docker', 'Kubernetes', 'K8s', 'Jenkins', 'Terraform', 'Ansible', 
+        'CI/CD', 'Git', 'GitHub', 'GitLab', 'Bitbucket', 'DevOps', 'Heroku', 'Vercel', 'Netlify', 'CloudFront', 'S3', 'Lambda', 'EC2',
         // Mobile
-        'React Native', 'Flutter', 'Ionic', 'Cordova', 'Android', 'iOS',
+        'React Native', 'Flutter', 'Ionic', 'Cordova', 'Android', 'iOS', 'Objective-C', 'Mobile App Development',
         // Testing
-        'Selenium', 'Testing', 'Manual Testing', 'Automation', 'QA', 'Cypress', 'Jest', 'Mocha', 'Chai', 'JUnit',
+        'Selenium', 'Testing', 'Manual Testing', 'Automation', 'QA', 'Cypress', 'Jest', 'Mocha', 'Chai', 'JUnit', 'Appium', 'Postman',
         // Data & BI
-        'Machine Learning', 'AI', 'Data Science', 'Deep Learning', 'Tableau', 'Power BI', 'Excel', 'Pandas', 'NumPy',
+        'Machine Learning', 'AI', 'Data Science', 'Deep Learning', 'Tableau', 'Power BI', 'Excel', 'Pandas', 'NumPy', 'Scikit-learn',
+        'PyTorch', 'TensorFlow', 'Keras', 'Big Data', 'Hadoop', 'Spark', 'SQL', 'NoSQL', 'Data Analytics',
+        // Security
+        'Cybersecurity', 'Ethical Hacking', 'Pentesting', 'Information Security', 'OAuth', 'JWT', 'SSL', 'Cryptography', 'Firewalls',
+        // Design & Multimedia
+        'Photoshop', 'Illustrator', 'InDesign', 'Canva', 'Sketch', 'Premiere Pro', 'After Effects', 'Video Editing', 'Graphic Design',
+        // Project Management & Tools
+        'Project Management', 'Agile', 'Scrum', 'Kanban', 'Jira', 'Trello', 'Asana', 'Confluence', 'Slack', 'Monday.com',
         // Business & Management
-        'Project Management', 'Agile', 'Scrum', 'Sales', 'Marketing', 'Accounting', 'HRMS', 'ERP', 'SAP', 
-        'Salesforce', 'CRM', 'Copywriting', 'SEO', 'SEM', 'Business Analysis', 'Product Management'
+        'Sales', 'Marketing', 'Accounting', 'Financing', 'HRMS', 'ERP', 'SAP', 'Salesforce', 'CRM', 'Copywriting', 'SEO', 'SEM', 
+        'Business Analysis', 'Product Management', 'Recruitment', 'Talent Acquisition', 'Operations', 'Supply Chain',
+        // Soft Skills
+        'Communication', 'Leadership', 'Teamwork', 'Problem Solving', 'Time Management', 'Critical Thinking', 'Adaptability', 'Emotional Intelligence'
     ];
 
     const detectedSkills = [];
