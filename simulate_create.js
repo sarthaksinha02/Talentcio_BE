@@ -69,7 +69,7 @@ const simulate = async () => {
             console.log('INNER ERROR:', innerErr);
             throw innerErr;
         }
-        
+
     } catch (err) {
         console.log('OUTER ERROR:', err);
     } finally {

@@ -116,7 +116,7 @@ exports.addEmployee = async (req, res) => {
 // --- Send selective pre-onboarding email ---
 exports.sendPreOnboardingEmail = async (req, res) => {
     try {
-        const { sections, documents } = req.body;
+        const { sections, documents, submissionDeadline } = req.body;
 
         if ((!sections || sections.length === 0) && (!documents || documents.length === 0)) {
             return res.status(400).json({ message: 'Please select at least one section or document' });
@@ -127,23 +127,54 @@ exports.sendPreOnboardingEmail = async (req, res) => {
             return res.status(404).json({ message: 'Employee not found' });
         }
 
-        // Save requested items for portal filtering (additive merge)
-        const existingSections = new Set(employee.requestedSections || []);
-        (sections || []).forEach(s => existingSections.add(s));
-        employee.requestedSections = [...existingSections];
+        // Update deadline if provided
+        if (submissionDeadline) {
+            employee.documentDeadline = new Date(submissionDeadline);
+            // Also update credential expiry to match the deadline (if not already further ahead)
+            employee.credentialsExpireAt = new Date(submissionDeadline);
+        }
 
-        const existingDocs = new Set(employee.requestedDocuments || []);
-        (documents || []).forEach(d => existingDocs.add(d));
-        employee.requestedDocuments = [...existingDocs];
+        // Save requested items for portal filtering (additive merge with timestamps)
+        const sectionsData = employee.requestedSections || [];
+        (sections || []).forEach(s => {
+            const found = sectionsData.find(rs => rs.label === s);
+            if (found) {
+                found.emailSentAt = new Date();
+            } else {
+                sectionsData.push({ label: s, emailSentAt: new Date() });
+            }
+        });
+        employee.requestedSections = sectionsData;
+
+        const docsData = employee.requestedDocuments || [];
+        (documents || []).forEach(d => {
+            const found = docsData.find(rd => rd.label === d);
+            if (found) {
+                found.emailSentAt = new Date();
+            } else {
+                docsData.push({ label: d, emailSentAt: new Date() });
+            }
+        });
+        employee.requestedDocuments = docsData;
 
         // Mark emailed documents as "Mail Sent" if they are still Pending
         if (documents && documents.length > 0) {
             const docLabelsSet = new Set(documents);
             employee.documents.forEach(doc => {
-                if (docLabelsSet.has(doc.label) && doc.status === 'Pending') {
+                if (docLabelsSet.has(doc.label) && (doc.status === 'Pending' || doc.status === 'Mail Sent')) {
                     doc.status = 'Mail Sent';
                     doc.emailSentAt = new Date();
                 }
+            });
+        }
+
+        // If employee already submitted, re-open for editing on new sections
+        if (employee.status === 'Submitted' || employee.status === 'Reviewed') {
+            employee.status = 'In Progress';
+            employee.submittedAt = null;
+            employee.auditLog.push({
+                action: 'REOPENED',
+                details: `Re-opened by HR for additional sections/documents`
             });
         }
 
@@ -253,7 +284,7 @@ exports.sendPreOnboardingEmail = async (req, res) => {
             }
         });
 
-        res.json({ message: 'Pre-onboarding email sent successfully' });
+        res.json({ message: 'Pre-onboarding email sent successfully', employee });
     } catch (error) {
         console.error('Error sending pre-onboarding email:', error);
         res.status(500).json({ message: 'Failed to send email', error: error.message });
@@ -409,7 +440,7 @@ exports.getOnboardingEmployee = async (req, res) => {
 exports.updateEmployee = async (req, res) => {
     try {
         const { firstName, lastName, email, phone, designation, department, joiningDate, documentDeadline, workLocation, address, probationPeriod, salary } = req.body;
-        
+
         const employee = await OnboardingEmployee.findOne({ _id: req.params.id, companyId: req.companyId });
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
@@ -451,7 +482,7 @@ exports.regenerateCredentials = async (req, res) => {
 
         const newPassword = Math.random().toString(36).slice(-8);
         employee.tempPassword = newPassword;
-        
+
         // Reset expiry to 7 days from now
         const expiry = new Date();
         expiry.setDate(expiry.getDate() + 7);
@@ -471,9 +502,9 @@ exports.regenerateCredentials = async (req, res) => {
         await employee.save();
 
         // Email logic removed per requirements; credentials will be sent when 'Send Pre-Onboarding Email' is triggered.
-        
-        res.status(200).json({ 
-            message: 'Credentials regenerated successfully.',  
+
+        res.status(200).json({
+            message: 'Credentials regenerated successfully.',
             tempEmployeeId: employee.tempEmployeeId,
             tempPassword: newPassword,
             expiry
@@ -512,14 +543,37 @@ exports.flagDocument = async (req, res) => {
         employee.auditLog.push({ action: 'DOCUMENT_FLAGGED', details: `${doc.label} flagged: ${reason}` });
         await employee.save();
 
-        // Send notification email to the employee
-        await sendEmail({
-            to: employee.email,
-            subject: `Action Required: Re-upload ${doc.label}`,
-            html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e0e0e0;border-radius:10px;"><h2 style="color:#dc2626;">Document Re-upload Required</h2><p>Hello ${employee.firstName},</p><p>Your document <strong>${doc.label}</strong> requires re-upload.</p><p><strong>Reason:</strong> ${reason}</p><p>Please log in to your Pre-Onboarding Portal and upload the corrected document.</p></div>`
-        });
+        // Check if all uploaded documents are now reviewed to send consolidated notification
+        const pendingReview = employee.documents.filter(d => d.status === 'Uploaded');
+        if (pendingReview.length === 0) {
+            const flaggedDocs = employee.documents.filter(d => d.status === 'Re-upload Required');
+            if (flaggedDocs.length > 0) {
+                // Send consolidated email
+                const flaggedListHtml = flaggedDocs.map(fd => `
+                    <div style="background: #fff5f5; border-left: 4px solid #f56565; padding: 12px; margin-bottom: 8px;">
+                        <strong style="color: #c53030;">${fd.label}</strong><br/>
+                        <span style="color: #718096; font-size: 13px;">Reason: ${fd.rejectionReason}</span>
+                    </div>
+                `).join('');
 
-        res.status(200).json({ message: 'Document flagged for re-upload', document: doc });
+                await sendEmail({
+                    to: employee.email,
+                    subject: `Action Required: Document Updates Needed for Your Onboarding`,
+                    html: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+                            <h2 style="color: #e53e3e;">Document Updates Required</h2>
+                            <p>Hello ${employee.firstName},</p>
+                            <p>During the review of your pre-onboarding submission, some documents were found to require updates or re-uploads:</p>
+                            ${flaggedListHtml}
+                            <p style="margin-top: 20px;">Please log in to your <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/pre-onboarding/login" style="color: #3182ce; font-weight: bold; text-decoration: none;">Pre-Onboarding Portal</a> to upload the corrected documents.</p>
+                            <p>Once you've uploaded all the required items, please resubmit the form.</p>
+                        </div>
+                    `
+                });
+            }
+        }
+
+        res.status(200).json({ message: 'Document flagged for re-upload', document: doc, employee });
     } catch (error) {
         console.error('Error flagging document:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
@@ -541,17 +595,46 @@ exports.approveDocument = async (req, res) => {
         doc.rejectionReason = '';
 
         // Check if all uploaded docs are approved, then mark as Reviewed
-        const allReviewed = employee.documents.every(d =>
-            d.status === 'Approved' || d.status === 'Pending' // Pending means optional and not uploaded
+        const allReviewedStatus = employee.documents.every(d =>
+            d.status === 'Approved' || d.status === 'Pending' || d.status === 'Mail Sent'
         );
-        if (allReviewed && employee.status === 'Submitted') {
+        if (allReviewedStatus && employee.status === 'Submitted') {
             employee.status = 'Reviewed';
         }
 
         employee.auditLog.push({ action: 'DOCUMENT_APPROVED', details: `${doc.label} approved` });
         await employee.save();
 
-        res.status(200).json({ message: 'Document approved', document: doc });
+        // Check for consolidated notification if all uploaded docs are now reviewed
+        const pendingReview = employee.documents.filter(d => d.status === 'Uploaded');
+        if (pendingReview.length === 0) {
+            const flaggedDocs = employee.documents.filter(d => d.status === 'Re-upload Required');
+            if (flaggedDocs.length > 0) {
+                const flaggedListHtml = flaggedDocs.map(fd => `
+                    <div style="background: #fff5f5; border-left: 4px solid #f56565; padding: 12px; margin-bottom: 8px;">
+                        <strong style="color: #c53030;">${fd.label}</strong><br/>
+                        <span style="color: #718096; font-size: 13px;">Reason: ${fd.rejectionReason}</span>
+                    </div>
+                `).join('');
+
+                await sendEmail({
+                    to: employee.email,
+                    subject: `Action Required: Document Updates Needed for Your Onboarding`,
+                    html: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+                            <h2 style="color: #e53e3e;">Document Updates Required</h2>
+                            <p>Hello ${employee.firstName},</p>
+                            <p>During the review of your pre-onboarding submission, some documents were found to require updates or re-uploads:</p>
+                            ${flaggedListHtml}
+                            <p style="margin-top: 20px;">Please log in to your <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/pre-onboarding/login" style="color: #3182ce; font-weight: bold; text-decoration: none;">Pre-Onboarding Portal</a> to upload the corrected documents.</p>
+                            <p>Once you've uploaded all the required items, please resubmit the form.</p>
+                        </div>
+                    `
+                });
+            }
+        }
+
+        res.status(200).json({ message: 'Document approved', document: doc, employee });
     } catch (error) {
         console.error('Error approving document:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
@@ -618,7 +701,7 @@ exports.employeeLogin = async (req, res) => {
         // Fetch the corresponding company if the frontend provides a tenant ID
         let query = { tempEmployeeId };
         const tenantId = req.headers['x-tenant-id'];
-        
+
         if (tenantId) {
             const company = await Company.findOne({ tenantId });
             if (company) {
@@ -846,6 +929,59 @@ exports.uploadDocument = async (req, res) => {
     }
 };
 
+// --- Add additional document slot (for multi-file types like salary_slip, graduation) ---
+exports.addDocumentSlot = async (req, res) => {
+    try {
+        const { type, label } = req.body;
+        const employee = req.onboardingEmployee;
+
+        if (!type || !label) {
+            return res.status(400).json({ message: 'Type and label are required' });
+        }
+
+        const existingCount = employee.documents.filter(d => d.type === type).length;
+        const newLabel = `${label} (${existingCount + 1})`;
+
+        employee.documents.push({ type, label: newLabel, status: 'Pending' });
+        await employee.save();
+
+        const newDoc = employee.documents[employee.documents.length - 1];
+        res.status(201).json({ message: 'Document slot added', document: newDoc });
+    } catch (error) {
+        console.error('Error adding document slot:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// --- Delete a dynamically added document slot ---
+exports.deleteDocumentSlot = async (req, res) => {
+    try {
+        const { docId } = req.params;
+        const employee = req.onboardingEmployee;
+
+        const doc = employee.documents.id(docId);
+        if (!doc) return res.status(404).json({ message: 'Document not found' });
+
+        // Only allow deleting dynamically added docs (labels with parenthetical numbers)
+        if (!/\(\d+\)$/.test(doc.label)) {
+            return res.status(400).json({ message: 'Cannot delete original document slots' });
+        }
+
+        // Delete from Cloudinary if uploaded
+        if (doc.publicId) {
+            try { await cloudinary.uploader.destroy(doc.publicId, { resource_type: 'raw' }); } catch (e) { /* ignore */ }
+        }
+
+        employee.documents.pull(docId);
+        await employee.save();
+
+        res.status(200).json({ message: 'Document slot removed' });
+    } catch (error) {
+        console.error('Error deleting document slot:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 // --- Upload cancelled cheque ---
 exports.uploadCheque = async (req, res) => {
     try {
@@ -892,21 +1028,23 @@ exports.submitOnboarding = async (req, res) => {
 
         // Validate only requested items
         const errors = [];
-        const reqSections = employee.requestedSections || [];
-        const reqDocs = employee.requestedDocuments || [];
-        const isSelective = reqSections.length > 0 || reqDocs.length > 0;
+        const reqSectionsRaw = employee.requestedSections || [];
+        const reqDocsRaw = employee.requestedDocuments || [];
+        const reqSectionLabels = reqSectionsRaw.map(rs => typeof rs === 'string' ? rs : rs.label);
+        const reqDocLabels = reqDocsRaw.map(rd => typeof rd === 'string' ? rd : rd.label);
+        const isSelective = reqSectionLabels.length > 0 || reqDocLabels.length > 0;
 
         // Form Sections Validation
-        if (!isSelective || reqSections.includes('Personal Details')) {
+        if (!isSelective || reqSectionLabels.includes('Personal Details')) {
             if (!employee.personalDetails?.isComplete) errors.push('Personal Details incomplete');
         }
-        if (!isSelective || reqSections.includes('Emergency Contact')) {
+        if (!isSelective || reqSectionLabels.includes('Emergency Contact')) {
             if (!employee.emergencyContact?.isComplete) errors.push('Emergency Contact incomplete');
         }
-        if (!isSelective || reqSections.includes('Bank Details')) {
+        if (!isSelective || reqSectionLabels.includes('Bank Details')) {
             if (!employee.bankDetails?.isComplete) errors.push('Bank Details incomplete');
         }
-        if (!isSelective || reqSections.includes('Offer Declaration')) {
+        if (!isSelective || reqSectionLabels.includes('Offer Declaration')) {
             if (!employee.offerDeclaration?.isComplete) errors.push('Offer Declaration incomplete');
         }
 
@@ -914,16 +1052,15 @@ exports.submitOnboarding = async (req, res) => {
         const mandatoryDocTypes = ['pan', 'passport_photo', 'aadhaar_front', 'aadhaar_back'];
         for (const doc of employee.documents) {
             const isMandatory = mandatoryDocTypes.includes(doc.type);
-            const isRequested = reqDocs.includes(doc.label);
+            const isRequested = reqDocLabels.includes(doc.label);
 
             if (isSelective) {
-                // If selective, only validate if it was specifically requested
-                if (isRequested && (doc.status === 'Pending' || !doc.url)) {
+                // Modified: Skip validation for 'passport' type even if requested (it is labeled as Optional)
+                if (isRequested && (doc.status === 'Pending' || doc.status === 'Mail Sent' || !doc.url) && doc.type !== 'passport') {
                     errors.push(`${doc.label} not uploaded`);
                 }
             } else if (isMandatory) {
-                // Not selective, validate all standard mandatory docs
-                if (doc.status === 'Pending' || !doc.url) {
+                if (doc.status === 'Pending' || doc.status === 'Mail Sent' || !doc.url) {
                     errors.push(`${doc.label} not uploaded`);
                 }
             }
@@ -1481,11 +1618,65 @@ exports.getMyOfferLetter = async (req, res) => {
 // --- Accept Offer Letter ---
 exports.acceptOfferLetter = async (req, res) => {
     try {
-        const employee = await OnboardingEmployee.findByIdAndUpdate(req.onboardingEmployee._id, {
-            offerStatus: 'Accepted',
-            status: 'In Progress',
-            $push: { auditLog: { action: 'OFFER_ACCEPTED', details: 'Employee accepted the offer letter terms.' } }
-        }, { new: true });
+        const employee = await OnboardingEmployee.findById(req.onboardingEmployee._id);
+        if (!employee) return res.status(404).json({ message: 'Employee not found' });
+
+        const Company = mongoose.model('Company');
+        const company = await Company.findById(employee.companyId).select('settings.onboarding');
+        const policies = company?.settings?.onboarding?.policies || [];
+        const dynamicTemplates = company?.settings?.onboarding?.dynamicTemplates || [];
+
+        // Prepare lists for automated acceptance
+        const reqDocsLabels = (employee.requestedDocuments || []).map(rd => typeof rd === 'string' ? rd : rd.label);
+
+        // 1. Mark requested templates as Accepted in offerDeclaration
+        if (reqDocsLabels.includes('Offer Letter')) {
+            employee.offerDeclaration.hasReadOfferLetter = true;
+        }
+
+        dynamicTemplates.forEach(temp => {
+            if (reqDocsLabels.includes(temp.name)) {
+                if (!employee.offerDeclaration.acceptedTemplates.some(t => t.templateId === temp._id.toString())) {
+                    employee.offerDeclaration.acceptedTemplates.push({
+                        templateId: temp._id.toString(),
+                        name: temp.name,
+                        acceptedAt: new Date()
+                    });
+                }
+            }
+        });
+
+        // 2. Mark requested policies as Accepted
+        policies.forEach(policy => {
+            if (reqDocsLabels.includes(policy.name)) {
+                if (!employee.offerDeclaration.acceptedPolicies.some(p => p.policyId === policy._id.toString())) {
+                    employee.offerDeclaration.acceptedPolicies.push({
+                        policyId: policy._id.toString(),
+                        name: policy.name,
+                        acceptedAt: new Date()
+                    });
+                }
+            }
+        });
+
+        // 3. Mark matching document status to Approved
+        employee.documents.forEach(doc => {
+            if (doc.type === 'offer-letter' || dynamicTemplates.some(t => t.name === doc.label)) {
+                doc.status = 'Approved';
+            }
+        });
+
+        // 4. Update overall status
+        employee.offerStatus = 'Accepted';
+        employee.status = 'In Progress';
+        employee.offerDeclaration.isComplete = true; // Mark acceptance section as complete
+
+        employee.auditLog.push({
+            action: 'OFFER_ACCEPTED',
+            details: 'Employee accepted the offer and acknowledged all requested documents/policies.'
+        });
+
+        await employee.save();
 
         res.status(200).json({ message: 'Offer accepted successfully!', offerStatus: employee.offerStatus });
     } catch (error) {
@@ -1626,7 +1817,7 @@ const DOC_CATEGORY_MAP = {
 exports.transferToActiveEmployee = async (req, res) => {
     try {
         const { roleId, employeeCode, password } = req.body || {};
-        
+
         const employee = await OnboardingEmployee.findOne({ _id: req.params.id, companyId: req.companyId });
         if (!employee) return res.status(404).json({ message: 'Onboarding employee not found' });
 
@@ -1862,7 +2053,7 @@ exports.requestExtension = async (req, res) => {
 exports.requestCredentialRegeneration = async (req, res) => {
     try {
         const { tempEmployeeId, reason } = req.body;
-        
+
         if (!tempEmployeeId) {
             return res.status(400).json({ message: 'Employee ID is required' });
         }

@@ -89,6 +89,8 @@ router.post('/refresh-token', protectOnboarding, onboardingController.refreshTok
 router.get('/my-profile', protectOnboarding, onboardingController.getMyOnboarding);
 router.patch('/my-profile/:section', protectOnboarding, onboardingController.saveSection);
 router.post('/my-profile/upload/:docId', protectOnboarding, upload.single('document'), onboardingController.uploadDocument);
+router.post('/my-profile/add-document-slot', protectOnboarding, onboardingController.addDocumentSlot);
+router.delete('/my-profile/delete-document-slot/:docId', protectOnboarding, onboardingController.deleteDocumentSlot);
 router.post('/my-profile/upload-cheque', protectOnboarding, upload.single('document'), onboardingController.uploadCheque);
 router.post('/my-profile/policies/:policyId/accept', protectOnboarding, onboardingController.acceptPolicy);
 router.get('/my-profile/download-template/:templateId', protectOnboarding, onboardingController.downloadTemplateById);

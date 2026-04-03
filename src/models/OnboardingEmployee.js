@@ -179,8 +179,14 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     offerLetterPublicId: { type: String, default: '' },
 
     // --- Selective Onboarding (Items checked by HR) ---
-    requestedSections: [{ type: String }],
-    requestedDocuments: [{ type: String }],
+    requestedSections: [{
+        label: { type: String, required: true },
+        emailSentAt: { type: Date }
+    }],
+    requestedDocuments: [{
+        label: { type: String, required: true },
+        emailSentAt: { type: Date }
+    }],
 
     // --- Audit & Requests ---
     auditLog: [auditEntrySchema],

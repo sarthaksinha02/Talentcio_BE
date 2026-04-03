@@ -1374,8 +1374,8 @@ exports.transferToOnboarding = async (req, res) => {
             },
             status: 'Pending',
             documents: defaultDocuments,
-            requestedSections: ['Personal Details', 'Emergency Contact', 'Bank Details', 'Offer Declaration'],
-            requestedDocuments: ['Updated Resume', 'PAN Card', 'Aadhaar Card (Front)', 'Aadhaar Card (Back)', 'Graduation Marksheet / Certificate', 'Salary Slip', 'Recent Passport-Size Photograph']
+            requestedSections: [],
+            requestedDocuments: []
         });
 
         console.log('💾 Saving onboarding employee with documents:', onboardingEmployee.documents.length);
