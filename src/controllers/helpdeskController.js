@@ -180,6 +180,9 @@ exports.getAssignedQueries = async (req, res) => {
 exports.getAllQueries = async (req, res) => {
     try {
         const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
+        
+        console.log(`[HelpDesk Debug] User: ${req.user.email}, Roles: ${JSON.stringify(req.user.roles.map(r => r.name || r))}, IsAdmin: ${isAdmin}, CompanyId: ${req.companyId}`);
+
         if (!isAdmin) return res.status(403).json({ success: false, message: 'Admins only' });
 
         const queries = await HelpdeskQuery.find({ companyId: req.companyId })
