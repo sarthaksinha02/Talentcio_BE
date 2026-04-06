@@ -179,7 +179,7 @@ exports.getAssignedQueries = async (req, res) => {
 
 exports.getAllQueries = async (req, res) => {
     try {
-        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
+        const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
         if (!isAdmin) return res.status(403).json({ success: false, message: 'Admins only' });
 
         const queries = await HelpdeskQuery.find({ companyId: req.companyId })
@@ -198,7 +198,7 @@ exports.getAllQueries = async (req, res) => {
 
 exports.getEscalatedQueries = async (req, res) => {
     try {
-        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
+        const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
         if (!isAdmin) return res.status(403).json({ success: false, message: 'Admins only' });
 
         const queries = await HelpdeskQuery.find({ status: 'Escalated', companyId: req.companyId })
@@ -260,7 +260,7 @@ exports.getQueryById = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Query not found' });
         }
 
-        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
+        const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
         const isAssignee = query.assignedTo?._id?.toString() === req.user._id.toString() || query.assignedTo?.toString() === req.user._id.toString();
         const isRaiser = query.raisedBy?._id?.toString() === req.user._id.toString() || query.raisedBy?.toString() === req.user._id.toString();
 
@@ -304,7 +304,7 @@ exports.updateQueryStatus = async (req, res) => {
 
         const originalStatus = query.status;
 
-        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
+        const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
         const isAssignee = query.assignedTo?.toString() === req.user._id.toString();
         const isRaiser = query.raisedBy?.toString() === req.user._id.toString();
 
@@ -469,7 +469,7 @@ exports.addComment = async (req, res) => {
 
         if (!query) return res.status(404).json({ success: false, message: 'Query not found' });
 
-        const isAdmin = req.user.roles.some(r => (r.name || r) === 'Admin' || r.isSystem === true);
+        const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
         const isAssignee = query.assignedTo?.toString() === req.user._id.toString();
         const isRaiser = query.raisedBy?.toString() === req.user._id.toString();
 
