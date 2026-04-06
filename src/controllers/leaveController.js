@@ -2,6 +2,7 @@ const LeaveRequest = require('../models/LeaveRequest');
 const LeaveBalance = require('../models/LeaveBalance');
 const LeaveConfig = require('../models/LeaveConfig');
 const User = require('../models/User');
+const Company = require('../models/Company');
 const { calculateLeaveDays } = require('../utils/leaveUtils');
 const NotificationService = require('../services/notificationService');
 
@@ -87,6 +88,9 @@ const applyLeave = async (req, res) => {
         }
 
         // 4. Calculate Days
+        const company = await Company.findById(req.companyId);
+        const weeklyOffs = company?.settings?.attendance?.weeklyOff || ['Saturday', 'Sunday'];
+
         let daysCount = 0;
         if (isHalfDay) {
             // Validate Half Day is same date
@@ -95,7 +99,7 @@ const applyLeave = async (req, res) => {
             }
             
             // Check if this date is a holiday or weekend
-            const holidayCheck = await calculateLeaveDays(new Date(startDate), new Date(endDate), policy);
+            const holidayCheck = await calculateLeaveDays(new Date(startDate), new Date(endDate), policy, weeklyOffs);
             if (holidayCheck === 0) {
                 // It's a holiday/weekend and sandwich rule is OFF
                 daysCount = 0;
@@ -103,7 +107,7 @@ const applyLeave = async (req, res) => {
                 daysCount = 0.5;
             }
         } else {
-            daysCount = await calculateLeaveDays(new Date(startDate), new Date(endDate), policy);
+            daysCount = await calculateLeaveDays(new Date(startDate), new Date(endDate), policy, weeklyOffs);
         }
 
         if (daysCount <= 0) {

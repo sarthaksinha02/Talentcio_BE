@@ -1,5 +1,5 @@
 const Holiday = require('../models/Holiday');
-const { eachDayOfInterval, isWeekend, isSameDay } = require('date-fns');
+const { eachDayOfInterval, format, isSameDay } = require('date-fns');
 
 /**
  * Calculate the number of leave days based on range and policy rules.
@@ -14,9 +14,10 @@ const { eachDayOfInterval, isWeekend, isSameDay } = require('date-fns');
  * @param {Date} startDate 
  * @param {Date} endDate 
  * @param {Object} leavePolicy (LeaveConfig)
+ * @param {Array<string>} weeklyOffs (List of day names, e.g. ['Saturday', 'Sunday'])
  * @returns {Number} daysCount
  */
-const calculateLeaveDays = async (startDate, endDate, leavePolicy) => {
+const calculateLeaveDays = async (startDate, endDate, leavePolicy, weeklyOffs = ['Saturday', 'Sunday']) => {
     if (!startDate || !endDate || !leavePolicy) return 0;
 
     // 1. Get all days in range
@@ -33,9 +34,10 @@ const calculateLeaveDays = async (startDate, endDate, leavePolicy) => {
     // 3. Iterate
     for (const day of days) {
         const dateStr = day.toDateString();
-        const isSatSun = isWeekend(day);
+        const dayName = format(day, 'EEEE');
+        const isWeeklyOff = weeklyOffs.includes(dayName);
         const isHoliday = holidayDates.includes(dateStr);
-        const isOffDay = isSatSun || isHoliday;
+        const isOffDay = isWeeklyOff || isHoliday;
 
         if (!isOffDay) {
             // Working Day -> Always Counts as Leave

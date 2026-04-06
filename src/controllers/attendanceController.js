@@ -241,7 +241,11 @@ exports.getAttendanceByMonth = async (req, res) => {
             .populate('user', 'firstName lastName')
             .sort({ date: -1 })
             .lean();
-        res.json(history);
+
+        const company = await Company.findById(req.companyId);
+        const weeklyOff = company?.settings?.attendance?.weeklyOff || ['Saturday', 'Sunday'];
+
+        res.json({ history, weeklyOff });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Server Error' });
@@ -449,28 +453,20 @@ exports.getTeamAttendanceReport = async (req, res) => {
             ];
         }
 
-        const leaveRecords = await LeaveRequest.find(leaveQuery).lean();
+        const leaves = await LeaveRequest.find(leaveQuery).lean();
+        const leaveConfigs = await LeaveConfig.find({ companyId: req.companyId }).select('leaveType sandwichRule').lean();
+        const sandwichMap = leaveConfigs.reduce((acc, c) => ({ ...acc, [c.leaveType]: c.sandwichRule }), {});
+
+        const leaveRecords = leaves.map(l => ({
+            ...l,
+            sandwichRule: sandwichMap[l.leaveType] || false
+        }));
 
         const attendanceRecords = await Attendance.find(attendanceQuery).lean();
-
-        // Get Weekly Offs from Company
         const company = await Company.findById(req.companyId);
-        const weeklyOffs = company?.settings?.attendance?.weeklyOff || ['Saturday', 'Sunday'];
+        const weeklyOff = company?.settings?.attendance?.weeklyOff || ['Saturday', 'Sunday'];
 
-        // Get LeaveConfigs for Sandwich Rule check
-        const leaveConfigs = await LeaveConfig.find({ companyId: req.companyId }).lean();
-
-        // Process records to apply sandwich rule and labels
-        // We'll return the raw data and let the frontend/export handle the complex sandwich logic,
-        // but for the JSON report, we'll provide the holiday names and leave types clearly.
-
-        res.json({ 
-            teamMembers, 
-            attendanceRecords, 
-            holidays: holidays.map(h => ({ ...h, name: h.name })), // Ensure name is present
-            leaveRecords: leaveRecords.map(l => ({ ...l, type: l.leaveType })),
-            weeklyOffs
-        });
+        res.json({ teamMembers, attendanceRecords, holidays, leaveRecords, weeklyOff });
     } catch (error) {
         console.error('getTeamAttendanceReport error:', error);
         res.status(500).json({ message: 'Server Error' });
@@ -481,6 +477,10 @@ exports.exportTeamAttendanceExcel = async (req, res) => {
     try {
         const { year, month } = req.query;
         if (!year || !month) return res.status(400).json({ message: 'Year and Month are required' });
+
+        // Fetch Company settings for weekly offs
+        const company = await Company.findById(req.companyId);
+        const weeklyOffs = company?.settings?.attendance?.weeklyOff || ['Saturday', 'Sunday'];
 
         const ExcelJS = require('exceljs');
         const workbook = new ExcelJS.Workbook();
@@ -527,20 +527,16 @@ exports.exportTeamAttendanceExcel = async (req, res) => {
             ]
         }).lean();
 
-        // Get Weekly Offs from Company
-        const company = await Company.findById(req.companyId);
-        const weeklyOffs = company?.settings?.attendance?.weeklyOff || ['Saturday', 'Sunday'];
-
-        // Get LeaveConfigs for Sandwich Rule check
-        const leaveConfigs = await LeaveConfig.find({ companyId: req.companyId, isActive: true }).lean();
+        const leaveConfigs = await LeaveConfig.find({ companyId: req.companyId }).select('leaveType sandwichRule').lean();
+        const sandwichMap = leaveConfigs.reduce((acc, c) => ({ ...acc, [c.leaveType]: c.sandwichRule }), {});
 
         // Styling
         const headerStyle = { font: { bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } }, border: { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } } };
 
         // Headers
         const headers = ['Employee Code', 'Employee Name'];
-        days.forEach(day => headers.push(format(day, 'd')));
-        headers.push('Present', 'Holiday', 'Leave', 'Absent');
+        days.forEach(day => headers.push(format(day, 'dd-EEE')));
+        headers.push('Present', 'Holiday', 'Weekoff', 'Leave', 'Absent');
         sheet.addRow(headers);
         sheet.getRow(1).eachCell(cell => Object.assign(cell, headerStyle));
 
@@ -549,18 +545,18 @@ exports.exportTeamAttendanceExcel = async (req, res) => {
             const rowData = [member.employeeCode, `${member.firstName} ${member.lastName}`];
             let presentCount = 0;
             let holidayCount = 0;
+            let weekoffCount = 0;
             let leaveCount = 0;
             let absentCount = 0;
 
-            // Pre-calculate status for all days to apply sandwich logic easily
-            const dayStatuses = days.map(day => {
+            days.forEach(day => {
                 const dayStr = format(day, 'yyyy-MM-dd');
                 const dayName = format(day, 'EEEE');
-
-                // Check Holiday
-                const holiday = holidays.find(h => format(new Date(h.date), 'yyyy-MM-dd') === dayStr);
                 
-                // Check Leave
+                // 1. Identification
+                const holiday = holidays.find(h => format(new Date(h.date), 'yyyy-MM-dd') === dayStr);
+                const isWeeklyOff = weeklyOffs.some(woff => woff.trim().toLowerCase() === dayName.toLowerCase());
+                
                 const onLeave = leaves.find(l => {
                     if (l.user.toString() !== member._id.toString()) return false;
                     const lStart = startOfDay(new Date(l.startDate));
@@ -569,99 +565,69 @@ exports.exportTeamAttendanceExcel = async (req, res) => {
                     return current >= lStart && current <= lEnd;
                 });
 
-                // Check Attendance
+                // 2. Status Priority Logic
+                
+                // If on leave, check if it should override Weekend/Holiday (Sandwich Rule)
+                if (onLeave) {
+                    const isOffDay = !!holiday || isWeeklyOff;
+                    const carriesSandwich = sandwichMap[onLeave.leaveType] || false;
+                    
+                    if (!isOffDay || carriesSandwich) {
+                        rowData.push('L');
+                        leaveCount++;
+                        return;
+                    }
+                }
+
+                // If not leave (or leaf didn't sandwich), check holiday
+                if (holiday) {
+                    rowData.push('H');
+                    holidayCount++;
+                    return;
+                }
+
+                // If not holiday, check weekly off
+                if (isWeeklyOff) {
+                    rowData.push('WO');
+                    weekoffCount++;
+                    return;
+                }
+
+                // 4. Check Attendance (Priority 4 - Working Days)
                 const hasAtt = attendanceRecords.find(a => 
                     a.user.toString() === member._id.toString() && 
                     format(new Date(a.date), 'yyyy-MM-dd') === dayStr
                 );
 
-                const isWeeklyOff = weeklyOffs.includes(dayName);
-
-                if (hasAtt) return { status: 'P', label: 'P' };
-                if (onLeave) return { status: 'L', label: onLeave.leaveType, type: onLeave.leaveType };
-                if (holiday) return { status: 'H', label: holiday.name };
-                if (isWeeklyOff) return { status: 'WO', label: dayName };
-                return { status: 'A', label: 'Absent' };
-            });
-
-            // Apply Sandwich Rule
-            dayStatuses.forEach((dayInfo, index) => {
-                if (dayInfo.status === 'H' || dayInfo.status === 'WO') {
-                    // Check if it should be sandwiched
-                    let prevWorkingDay = null;
-                    for (let i = index - 1; i >= 0; i--) {
-                        if (dayStatuses[i].status !== 'H' && dayStatuses[i].status !== 'WO') {
-                            prevWorkingDay = dayStatuses[i];
-                            break;
-                        }
-                    }
-
-                    let nextWorkingDay = null;
-                    for (let i = index + 1; i < dayStatuses.length; i++) {
-                        if (dayStatuses[i].status !== 'H' && dayStatuses[i].status !== 'WO') {
-                            nextWorkingDay = dayStatuses[i];
-                            break;
-                        }
-                    }
-
-                    if (prevWorkingDay && nextWorkingDay) {
-                        const isPrevLeaveOrAbsent = prevWorkingDay.status === 'L' || prevWorkingDay.status === 'A';
-                        const isNextLeaveOrAbsent = nextWorkingDay.status === 'L' || nextWorkingDay.status === 'A';
-
-                        if (isPrevLeaveOrAbsent && isNextLeaveOrAbsent) {
-                            // Apply sandwich if anyone has a leave config with sandwich rule
-                            let applies = false;
-                            if (prevWorkingDay.status === 'L') {
-                                const config = leaveConfigs.find(c => c.leaveType === prevWorkingDay.type);
-                                if (config?.sandwichRule) applies = true;
-                            } else if (prevWorkingDay.status === 'A') {
-                                applies = true; // Assume Absent always sandwiches if the user says so
-                            }
-
-                            if (applies) {
-                                // Prefer the leave type from the surrounding days
-                                dayInfo.label = prevWorkingDay.status === 'L' ? prevWorkingDay.label : 'Absent';
-                                dayInfo.status = prevWorkingDay.status;
-                            }
-                        }
-                    }
+                if (hasAtt) {
+                    rowData.push('P');
+                    presentCount++;
+                } else {
+                    rowData.push('A');
+                    absentCount++;
                 }
             });
 
-            // Populate row data and update summary
-            dayStatuses.forEach(dayInfo => {
-                rowData.push(dayInfo.label);
-                if (dayInfo.status === 'P') presentCount++;
-                else if (dayInfo.status === 'H') holidayCount++;
-                else if (dayInfo.status === 'L') leaveCount++;
-                else if (dayInfo.status === 'A') absentCount++;
-            });
-
-            rowData.push(presentCount, holidayCount, leaveCount, absentCount);
+            rowData.push(presentCount, holidayCount, weekoffCount, leaveCount, absentCount);
             const row = sheet.addRow(rowData);
 
             // Conditional Styling for row cells
             row.eachCell((cell, colNumber) => {
                 if (colNumber > 2 && colNumber <= (2 + days.length)) {
-                    const status = dayStatuses[colNumber - 3].status;
-                    if (status === 'P') {
-                        cell.font = { color: { argb: 'FF008000' }, bold: true }; // Green
-                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6FFE6' } };
+                    const val = cell.value;
+                    if (val === 'P') cell.font = { color: { argb: 'FF008000' }, bold: true }; // Green
+                    if (val === 'A') cell.font = { color: { argb: 'FFFF0000' } }; // Red
+                    if (val === 'H') {
+                        cell.font = { color: { argb: 'FFFF8C00' }, bold: true }; // Dark Orange
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF4E5' } };
                     }
-                    if (status === 'A') {
-                        cell.font = { color: { argb: 'FFFF0000' } }; // Red
-                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE6E6' } };
+                    if (val === 'L') {
+                        cell.font = { color: { argb: 'FF0000FF' }, bold: true }; // Blue
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6E6FF' } };
                     }
-                    if (status === 'H') {
-                        cell.font = { color: { argb: 'FF006400' }, bold: true }; // Dark Green
-                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F5F0' } };
-                    }
-                    if (status === 'L') {
-                        cell.font = { color: { argb: 'FF4B0082' }, bold: true }; // Indigo
-                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0E6FF' } };
-                    }
-                    if (status === 'WO') {
+                    if (val === 'WO') {
                         cell.font = { color: { argb: 'FF808080' } }; // Gray
+                        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
                     }
                     cell.alignment = { horizontal: 'center' };
                 }
@@ -670,8 +636,9 @@ exports.exportTeamAttendanceExcel = async (req, res) => {
 
         // Column widths
         sheet.columns.forEach((col, i) => {
-            if (i < 2) col.width = 25;
-            else col.width = 12; // Wider for descriptive labels
+            if (i < 2) col.width = 20;
+            else if (i < 2 + days.length) col.width = 8; // Wider for dd-EEE
+            else col.width = 10;
         });
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
