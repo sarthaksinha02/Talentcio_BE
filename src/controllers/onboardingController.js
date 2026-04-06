@@ -27,10 +27,39 @@ const generateTempPassword = (length = 10) => {
     return password;
 };
 
+const formatDate = (date) => {
+    if (!date) return '';
+    return new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+};
+
+const formatCurrency = (val) => {
+    if (!val) return '—';
+    const num = parseFloat(String(val).replace(/[^0-9.]/g, ''));
+    if (isNaN(num)) return val;
+    return '₹ ' + num.toLocaleString('en-IN');
+};
+
+const getTemplateContent = async (customUrl, defaultPath) => {
+    try {
+        if (customUrl && typeof customUrl === 'string' && customUrl.startsWith('http')) {
+            console.log('Fetching custom template from:', customUrl);
+            const response = await axios.get(customUrl, { responseType: 'arraybuffer' });
+            return response.data;
+        }
+    } catch (err) {
+        console.error('Failed to fetch remote template, falling back to default:', err.message);
+    }
+
+    if (!fs.existsSync(defaultPath)) {
+        throw new Error(`Default template not found at ${defaultPath}. Please run the template generation script.`);
+    }
+    return fs.readFileSync(defaultPath, 'binary');
+};
+
 // --- Add a new onboarding employee ---
 exports.addEmployee = async (req, res) => {
     try {
-        const { firstName, lastName, email, phone, designation, department, joiningDate, documentDeadline, offerLetterUrl, offerLetterPublicId, address, workLocation, probationPeriod } = req.body;
+        const { firstName, lastName, email, phone, designation, department, joiningDate, offerDate, documentDeadline, offerLetterUrl, offerLetterPublicId, address, workLocation, probationPeriod, salary } = req.body;
 
         if (!firstName || !email) {
             return res.status(400).json({ message: 'First name and email are required' });
@@ -71,10 +100,12 @@ exports.addEmployee = async (req, res) => {
             designation: designation || '',
             department: department || '',
             joiningDate: joiningDate || undefined,
+            offerDate: offerDate || undefined,
             documentDeadline: documentDeadline || undefined,
             workLocation: workLocation || '',
             address: address || '',
             probationPeriod: probationPeriod || '6 months',
+            salary: salary || {},
             credentialsExpireAt: documentDeadline || undefined,
             offerLetterUrl: offerLetterUrl || '',
             offerLetterPublicId: offerLetterPublicId || '',
@@ -291,6 +322,61 @@ exports.sendPreOnboardingEmail = async (req, res) => {
     }
 };
 
+// --- Send a custom file to candidate ---
+exports.sendCustomFile = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const employee = await OnboardingEmployee.findOne({ _id: id, companyId: req.companyId });
+        if (!employee) return res.status(404).json({ message: 'Employee not found' });
+
+        if (!req.file) {
+            return res.status(400).json({ message: 'No file uploaded' });
+        }
+
+        const emailHtml = `
+            <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
+                <h2 style="color: #2563eb; margin: 0 0 16px;">New Document from HR</h2>
+                <p>Hello <strong>${employee.firstName}</strong>,</p>
+                <p>Your HR team has sent you an additional document regarding your onboarding process.</p>
+                <p>Please find the attached file: <strong>${req.file.originalname}</strong></p>
+                <div style="margin: 24px 0; padding: 16px; background: #f8fafc; border-radius: 8px; font-size: 14px; border: 1px solid #e2e8f0;">
+                    📁 <strong>File:</strong> ${req.file.originalname}
+                </div>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+                <p style="font-size: 12px; color: #94a3b8; text-align: center;">© ${new Date().getFullYear()} TalentCio. All rights reserved.</p>
+            </div>
+        `;
+
+        const sent = await sendEmail({
+            to: employee.email,
+            subject: `Action Required: New Document for Your Onboarding – ${req.file.originalname}`,
+            html: emailHtml,
+            attachments: [
+                {
+                    filename: req.file.originalname,
+                    path: req.file.path // Uses Cloudinary URL
+                }
+            ]
+        });
+
+        if (!sent) {
+            return res.status(500).json({ message: 'Failed to send email' });
+        }
+
+        // Add audit log
+        employee.auditLog.push({
+            action: 'CUSTOM_FILE_SENT',
+            details: `File "${req.file.originalname}" sent to candidate's email by HR`
+        });
+        await employee.save();
+
+        res.json({ message: 'File sent successfully to candidate email' });
+    } catch (error) {
+        console.error('Error sending custom file:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
 // --- Bulk add employees ---
 exports.bulkAddEmployees = async (req, res) => {
     try {
@@ -439,7 +525,7 @@ exports.getOnboardingEmployee = async (req, res) => {
 // --- Update onboarding employee details ---
 exports.updateEmployee = async (req, res) => {
     try {
-        const { firstName, lastName, email, phone, designation, department, joiningDate, documentDeadline, workLocation, address, probationPeriod, salary } = req.body;
+        const { firstName, lastName, email, phone, designation, department, joiningDate, offerDate, documentDeadline, workLocation, address, probationPeriod, salary } = req.body;
 
         const employee = await OnboardingEmployee.findOne({ _id: req.params.id, companyId: req.companyId });
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
@@ -452,6 +538,7 @@ exports.updateEmployee = async (req, res) => {
         if (designation) employee.designation = designation;
         if (department) employee.department = department;
         if (joiningDate) employee.joiningDate = joiningDate;
+        if (offerDate) employee.offerDate = offerDate;
         if (documentDeadline) employee.documentDeadline = documentDeadline;
         if (workLocation) employee.workLocation = workLocation;
         if (address) employee.address = address;
@@ -1169,6 +1256,48 @@ exports.uploadAndSetTemplate = async (req, res) => {
     }
 };
 
+// DELETE /api/onboarding/settings/templates/:type
+exports.deleteBaseTemplate = async (req, res) => {
+    try {
+        const { type } = req.params; // 'offerLetter' or 'declaration'
+        if (!['offerLetter', 'declaration'].includes(type)) {
+            return res.status(400).json({ message: 'Invalid template type' });
+        }
+
+        const company = await Company.findById(req.companyId).select('settings.onboarding');
+        const field = type === 'offerLetter' ? 'offerLetterTemplateUrl' : 'declarationTemplateUrl';
+        const templateUrl = company.settings.onboarding[field];
+
+        if (!templateUrl) {
+            return res.status(400).json({ message: 'No custom template to delete' });
+        }
+
+        // Delete from Cloudinary if it's a Cloudinary URL
+        const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
+        const publicId = extractPublicIdFromUrl(templateUrl);
+        if (publicId) {
+            const { cloudinary } = require('../config/cloudinary');
+            try {
+                // Templates are usually uploaded as 'raw' resource_type in many setups, 
+                // but if using standard upload single, it might be 'auto'.
+                // Cloudinary destroy often needs resource_type: 'raw' for .docx.
+                await cloudinary.uploader.destroy(publicId, { resource_type: 'raw' });
+            } catch (e) {
+                console.error('Cloudinary delete error:', e.message);
+            }
+        }
+
+        // Clear in DB
+        company.settings.onboarding[field] = '';
+        await company.save();
+
+        res.json({ message: `${type === 'offerLetter' ? 'Offer Letter' : 'Declaration'} template deleted successfully.` });
+    } catch (error) {
+        console.error('Error deleting template:', error);
+        res.status(500).json({ message: 'Failed to delete template', error: error.message });
+    }
+};
+
 // POST /api/onboarding/settings/policies/upload
 exports.addPolicy = async (req, res) => {
     try {
@@ -1292,27 +1421,28 @@ exports.acceptTemplate = async (req, res) => {
 };
 
 const DUMMY_PREVIEW_DATA = {
-    offer_date: 'June 30, 2025',
+    offer_date: formatDate(new Date()),
     employee_full_name: 'Johnathan Doe',
     employee_first_name: 'Johnathan',
     employee_last_name: 'Doe',
-    employee_permanent_address: 'Permanent Address, India',
-    employee_address: 'Permanent Address, India',
+    employee_permanent_address: '123 Main Street, Phase 5',
+    employee_address: '123 Main Street, Phase 5',
     employee_city: 'New Delhi',
     designation: 'Senior Software Engineer',
     department: 'Information Technology',
-    joining_date: 'June 10, 2025',
-    work_location: 'Gurugram (Hybrid)',
+    joining_date: formatDate(new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)), // 15 days from now
+    work_location: 'Bangalore (Hybrid)',
     probation_period: '6 months',
+    probationPeriod: '6 months',
     annual_ctc: '₹ 25,00,000',
     basic_salary: '₹ 1,00,000',
     hra: '₹ 40,000',
     special_allowance: '₹ 68,333',
     monthly_gross: '₹ 2,08,333',
-    monthly_ctc: '₹ 2,08,333',
+    monthly_ctc: '₹ 2,15,000',
     hr_name: 'Sarah Smith',
     hr_designation: 'HR Director',
-    declaration_date: 'March 20, 2026',
+    declaration_date: formatDate(new Date()),
     employee_signature_name: 'Johnathan Doe',
     employee_id: 'TEMP_123456'
 };
@@ -1384,34 +1514,7 @@ exports.downloadTemplate = async (req, res) => {
 // DOCUMENT GENERATION ENDPOINTS
 // ==========================================
 
-const getTemplateContent = async (customUrl, defaultPath) => {
-    try {
-        if (customUrl && typeof customUrl === 'string' && customUrl.startsWith('http')) {
-            console.log('Fetching custom template from:', customUrl);
-            const response = await axios.get(customUrl, { responseType: 'arraybuffer' });
-            return response.data;
-        }
-    } catch (err) {
-        console.error('Failed to fetch remote template, falling back to default:', err.message);
-    }
 
-    if (!fs.existsSync(defaultPath)) {
-        throw new Error(`Default template not found at ${defaultPath}. Please run the template generation script.`);
-    }
-    return fs.readFileSync(defaultPath, 'binary');
-};
-
-const formatDate = (date) => {
-    if (!date) return '';
-    return new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
-};
-
-const formatCurrency = (val) => {
-    if (!val) return '—';
-    const num = parseFloat(String(val).replace(/[^0-9.]/g, ''));
-    if (isNaN(num)) return val;
-    return '₹ ' + num.toLocaleString('en-IN');
-};
 
 // --- Generate & download Offer Letter ---
 exports.generateOfferLetter = async (req, res) => {
@@ -1441,7 +1544,7 @@ exports.generateOfferLetter = async (req, res) => {
         const hrUser = employee.createdBy || {};
 
         doc.render({
-            offer_date: formatDate(new Date()),
+            offer_date: formatDate(employee.offerDate || new Date()),
             employee_full_name: fullName,
             employee_first_name: employee.firstName,
             employee_last_name: employee.lastName,
@@ -1453,7 +1556,9 @@ exports.generateOfferLetter = async (req, res) => {
             joining_date: formatDate(employee.joiningDate),
             work_location: employee.workLocation || '—',
             probation_period: employee.probationPeriod || '6 months',
+            probationPeriod: employee.probationPeriod || '6 months',
             annual_ctc: formatCurrency(employee.salary?.annualCTC),
+            annual_salary: formatCurrency(employee.salary?.annualCTC),
             basic_salary: formatCurrency(employee.salary?.basic),
             hra: formatCurrency(employee.salary?.hra),
             special_allowance: formatCurrency(employee.salary?.specialAllowance),
@@ -1513,13 +1618,24 @@ exports.generateDeclaration = async (req, res) => {
         const hrUser = employee.createdBy || {};
 
         doc.render({
-            declaration_date: formatDate(new Date()),
+            declaration_date: formatDate(employee.offerDate || new Date()),
             employee_full_name: fullName,
+            employee_first_name: employee.firstName,
+            employee_last_name: employee.lastName,
             employee_id: employee.tempEmployeeId,
             designation: employee.designation || '—',
             department: employee.department || '—',
             joining_date: formatDate(employee.joiningDate),
             work_location: employee.workLocation || '—',
+            probation_period: employee.probationPeriod || '6 months',
+            probationPeriod: employee.probationPeriod || '6 months',
+            annual_ctc: formatCurrency(employee.salary?.annualCTC),
+            annual_salary: formatCurrency(employee.salary?.annualCTC),
+            basic_salary: formatCurrency(employee.salary?.basic),
+            hra: formatCurrency(employee.salary?.hra),
+            special_allowance: formatCurrency(employee.salary?.specialAllowance),
+            monthly_gross: formatCurrency(employee.salary?.monthlyGross),
+            monthly_ctc: formatCurrency(employee.salary?.monthlyCTC),
             employee_signature_name: fullName,
             hr_name: hrUser.firstName ? `${hrUser.firstName} ${hrUser.lastName || ''}`.trim() : 'Authorized Signatory',
             hr_designation: hrUser.designation || 'HR Manager'
@@ -1575,9 +1691,10 @@ exports.getMyOfferLetter = async (req, res) => {
         const hrUser = employee.createdBy || {};
 
         doc.render({
-            offer_date: formatDate(new Date()),
+            offer_date: formatDate(employee.offerDate || new Date()),
             employee_full_name: fullName,
             employee_first_name: employee.firstName,
+            employee_last_name: employee.lastName,
             employee_permanent_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
             employee_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
             employee_city: permAddr.city || '—',
@@ -1586,7 +1703,9 @@ exports.getMyOfferLetter = async (req, res) => {
             joining_date: formatDate(employee.joiningDate),
             work_location: employee.workLocation || '—',
             probation_period: employee.probationPeriod || '6 months',
+            probationPeriod: employee.probationPeriod || '6 months',
             annual_ctc: formatCurrency(employee.salary?.annualCTC),
+            annual_salary: formatCurrency(employee.salary?.annualCTC),
             basic_salary: formatCurrency(employee.salary?.basic),
             hra: formatCurrency(employee.salary?.hra),
             special_allowance: formatCurrency(employee.salary?.specialAllowance),
@@ -1594,7 +1713,7 @@ exports.getMyOfferLetter = async (req, res) => {
             monthly_ctc: formatCurrency(employee.salary?.monthlyCTC),
             hr_name: hrUser.firstName ? `${hrUser.firstName} ${hrUser.lastName || ''}`.trim() : 'Authorized Signatory',
             hr_designation: hrUser.designation || 'HR Manager',
-            declaration_date: formatDate(new Date()),
+            declaration_date: formatDate(employee.offerDate || new Date()),
             employee_signature_name: fullName,
             employee_id: employee.tempEmployeeId
         });
@@ -1767,13 +1886,24 @@ exports.downloadTemplateById = async (req, res) => {
         const permAddr = employee.personalDetails?.permanentAddress || employee.personalDetails?.currentAddress || {};
 
         doc.render({
-            offer_date: formatDate(new Date()),
+            offer_date: formatDate(employee.offerDate || new Date()),
             employee_full_name: fullName,
+            employee_first_name: employee.firstName,
+            employee_last_name: employee.lastName,
             employee_id: employee.tempEmployeeId,
             designation: employee.designation || '—',
             department: employee.department || '—',
             joining_date: formatDate(employee.joiningDate),
             work_location: employee.workLocation || '—',
+            probation_period: employee.probationPeriod || '6 months',
+            probationPeriod: employee.probationPeriod || '6 months',
+            annual_ctc: formatCurrency(employee.salary?.annualCTC),
+            annual_salary: formatCurrency(employee.salary?.annualCTC),
+            basic_salary: formatCurrency(employee.salary?.basic),
+            hra: formatCurrency(employee.salary?.hra),
+            special_allowance: formatCurrency(employee.salary?.specialAllowance),
+            monthly_gross: formatCurrency(employee.salary?.monthlyGross),
+            monthly_ctc: formatCurrency(employee.salary?.monthlyCTC),
             employee_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
             hr_name: hrUser.firstName ? `${hrUser.firstName} ${hrUser.lastName || ''}`.trim() : 'Authorized Signatory',
             hr_designation: hrUser.designation || 'HR Manager'

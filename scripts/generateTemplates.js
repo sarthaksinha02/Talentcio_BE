@@ -9,7 +9,7 @@ const Docxtemplater = require('docxtemplater');
 
 const templatesDir = path.join(__dirname, '..', 'templates');
 if (!fs.existsSync(templatesDir)) {
-    fs.mkdirSync(templatesDir, { recursive: true });
+  fs.mkdirSync(templatesDir, { recursive: true });
 }
 
 /**
@@ -17,12 +17,12 @@ if (!fs.existsSync(templatesDir)) {
  * The text uses {placeholder} syntax that docxtemplater will fill in.
  */
 function createTemplate(filename, textContent) {
-    // A minimal valid .docx file is a ZIP containing specific XML files.
-    // We'll create one from scratch using PizZip.
-    const zip = new PizZip();
+  // A minimal valid .docx file is a ZIP containing specific XML files.
+  // We'll create one from scratch using PizZip.
+  const zip = new PizZip();
 
-    // [Content_Types].xml
-    zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  // [Content_Types].xml
+  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
@@ -30,20 +30,20 @@ function createTemplate(filename, textContent) {
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>`);
 
-    // _rels/.rels
-    zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  // _rels/.rels
+  zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`);
 
-    // word/_rels/document.xml.rels
-    zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  // word/_rels/document.xml.rels
+  zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`);
 
-    // word/styles.xml - basic styles
-    zip.file('word/styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  // word/styles.xml - basic styles
+  zip.file('word/styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:style w:type="paragraph" w:styleId="Normal" w:default="1">
     <w:name w:val="Normal"/>
@@ -60,59 +60,59 @@ function createTemplate(filename, textContent) {
   </w:style>
 </w:styles>`);
 
-    // Convert text content to Word XML paragraphs
-    const paragraphs = textContent.split('\n').map(line => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-            return '<w:p><w:r><w:t xml:space="preserve"> </w:t></w:r></w:p>';
-        }
+  // Convert text content to Word XML paragraphs
+  const paragraphs = textContent.split('\n').map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return '<w:p><w:r><w:t xml:space="preserve"> </w:t></w:r></w:p>';
+    }
 
-        let style = '';
-        let text = trimmed;
+    let style = '';
+    let text = trimmed;
 
-        // Heading detection
-        if (trimmed.startsWith('# ')) {
-            style = '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>';
-            text = trimmed.substring(2);
-        } else if (trimmed.startsWith('## ')) {
-            style = '<w:pPr><w:pStyle w:val="Heading2"/></w:pPr>';
-            text = trimmed.substring(3);
-        } else if (trimmed.startsWith('---')) {
-            // Horizontal rule as a centered line
-            return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">────────────────────────────────────────────────────────</w:t></w:r></w:p>`;
-        }
+    // Heading detection
+    if (trimmed.startsWith('# ')) {
+      style = '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>';
+      text = trimmed.substring(2);
+    } else if (trimmed.startsWith('## ')) {
+      style = '<w:pPr><w:pStyle w:val="Heading2"/></w:pPr>';
+      text = trimmed.substring(3);
+    } else if (trimmed.startsWith('---')) {
+      // Horizontal rule as a centered line
+      return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">────────────────────────────────────────────────────────</w:t></w:r></w:p>`;
+    }
 
-        // Bold detection: **text**
-        const parts = [];
-        const regex = /\*\*(.*?)\*\*/g;
-        let lastIndex = 0;
-        let match;
-        while ((match = regex.exec(text)) !== null) {
-            if (match.index > lastIndex) {
-                parts.push({ text: text.substring(lastIndex, match.index), bold: false });
-            }
-            parts.push({ text: match[1], bold: true });
-            lastIndex = match.index + match[0].length;
-        }
-        if (lastIndex < text.length) {
-            parts.push({ text: text.substring(lastIndex), bold: false });
-        }
-        if (parts.length === 0) {
-            parts.push({ text, bold: false });
-        }
+    // Bold detection: **text**
+    const parts = [];
+    const regex = /\*\*(.*?)\*\*/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({ text: text.substring(lastIndex, match.index), bold: false });
+      }
+      parts.push({ text: match[1], bold: true });
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) {
+      parts.push({ text: text.substring(lastIndex), bold: false });
+    }
+    if (parts.length === 0) {
+      parts.push({ text, bold: false });
+    }
 
-        const runs = parts.map(p => {
-            const rPr = p.bold ? '<w:rPr><w:b/></w:rPr>' : '';
-            // Escape XML special chars
-            const escaped = p.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            return `<w:r>${rPr}<w:t xml:space="preserve">${escaped}</w:t></w:r>`;
-        }).join('');
+    const runs = parts.map(p => {
+      const rPr = p.bold ? '<w:rPr><w:b/></w:rPr>' : '';
+      // Escape XML special chars
+      const escaped = p.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<w:r>${rPr}<w:t xml:space="preserve">${escaped}</w:t></w:r>`;
+    }).join('');
 
-        return `<w:p>${style}${runs}</w:p>`;
-    }).join('\n');
+    return `<w:p>${style}${runs}</w:p>`;
+  }).join('\n');
 
-    // word/document.xml
-    zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  // word/document.xml
+  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
     ${paragraphs}
@@ -123,26 +123,23 @@ function createTemplate(filename, textContent) {
   </w:body>
 </w:document>`);
 
-    const buffer = zip.generate({ type: 'nodebuffer' });
-    const filePath = path.join(templatesDir, filename);
-    fs.writeFileSync(filePath, buffer);
-    console.log(`✅ Created: ${filePath}`);
+  const buffer = zip.generate({ type: 'nodebuffer' });
+  const filePath = path.join(templatesDir, filename);
+  fs.writeFileSync(filePath, buffer);
+  console.log(`✅ Created: ${filePath}`);
 }
 
 // ==========================================
 // OFFER LETTER TEMPLATE
 // ==========================================
-const offerLetterContent = `# Resource Gateway Consulting Pvt. Ltd.
-# Appointment Letter
-
-{offer_date}
+const offerLetterContent = `June 30, 2025
 
 {employee_full_name}
-{employee_permanent_address}, {employee_city}, India
+{employee_address}
 
 **Subject: Appointment-cum-Employment Letter**
 
-Dear {employee_first_name},
+Dear {employee_full_name},
 
 Greetings from Resource Gateway Consulting Pvt. Ltd. (Resource Gateway)!
 
@@ -156,7 +153,7 @@ Your designation is **"{designation}"**, and you will report to the designated M
 
 ## 2. Date of Joining
 
-Your joining date is **{joining_date}**.
+Your joining date is **{joining_date}**
 
 ## 3. Compensation
 
@@ -166,18 +163,17 @@ Note: Your compensation is subject to periodic review and may be revised based o
 
 ## 4. Place of Work
 
-Your primary work location is **{work_location}**. However, you may be required to travel or relocate based on project/client needs.
+Your primary work location is **Bangalore(Hybrid for now, may change in future as per project requirement)**. However, you may be required to travel or relocate based on project/client needs.
 
 ## 5. Working Hours
 
-Your working hours will be as per client requirements and the timings policy governed by the client.
+Your working hours will be as per client requirements and the timings policy governed by the client
 
 ## 6. Probation Period
 
 You will be on a probation period of **{probation_period}** from your date of joining. Your performance will be reviewed during this period, and upon successful completion, your employment will be confirmed in writing.
 
 ## 7. Leave Policy
-
 You will be eligible for 1.5 days of leave per month, accrued on a monthly basis.
 We believe in maintaining a healthy work-life balance and encourage you to take time off when needed. At the same time, the first 3 to 6 months in your role are an important phase for learning, collaboration, and getting fully integrated into the team. We therefore encourage you to plan your leave accordingly and, as far as possible, minimize time off during this period.
 We completely understand that personal or unforeseen situations may arise. In such instances, or for any planned leave, we request you to seek prior written approval from your reporting manager and keep the HR team informed, so that work can be managed smoothly.
@@ -197,15 +193,18 @@ Failure to return the equipment or damage beyond reasonable wear and tear may le
 
 You shall not, during or after your employment with Resource Gateway, either directly or indirectly, disclose, communicate, or use any proprietary or confidential information related to Resource Gateway or its clients, including but not limited to:
 
+
 - Business strategies and plans
 - Client and project information
 - Technical and financial data
 - Source code, documentation, processes, designs, algorithms, and system architecture
 - Any personal data, sensitive or otherwise, accessed or processed in the course of employment
 
+
 Client Data Confidentiality: As part of your assignment with clients, you acknowledge and agree that all client data, communications, technology, and project details are the exclusive and confidential property of the client. You are expected to comply with both Resource Gateway and client's confidentiality and data protection standards, as applicable.
 
 This clause shall be effective throughout your term of employment and shall survive post-termination.
+
 
 ## 10. Intellectual Property (IP) Rights
 
@@ -228,16 +227,16 @@ Post-confirmation, a notice period of two (2) months in writing or salary in lie
 All terminations must be documented in writing. You are required to return all company property and settle any dues prior to your final exit.
 
 ## 13. Governing Law
-
-This appointment letter and your employment shall be governed by and construed in accordance with the laws of Gurugram Jurisdiction, Republic of India.
+This appointment letter and your employment shall be governed by and construed in accordance with the laws of [Gurugram Jurisdiction, e.g., Republic of India].
 
 ## 14. Policy Changes
 
 Resource Gateway reserves the right to modify, amend, or discontinue any policies or terms of employment at its sole discretion, as required by business or legal circumstances.
 
+
 ---
 
-# Declaration by Employee
+**Declaration by Employee**
 
 I hereby declare that:
 
@@ -247,23 +246,23 @@ I hereby declare that:
 
 I confirm that the above information is true to the best of my knowledge, and I understand that providing false information can lead to termination of my employment without notice.
 
-# Employee Acknowledgment
+**Employee Acknowledgment**
 
-I, {employee_full_name}, have read and understood the terms and conditions outlined in this letter, including those related to confidentiality, company property, and intellectual property, and accept the appointment on the stated terms.
+I, **{employee_full_name}**, have read and understood the terms and conditions outlined in this letter, including those related to confidentiality, company property, and intellectual property, and accept the appointment on the stated terms.
 
 **Name:** {employee_full_name}
-**Signature:** {employee_signature_name}
-**Date:** {declaration_date}
+**Signature:** _______________________
+**Date:** ___________________________
 
 **For Resource Gateway Consulting Pvt. Ltd.**
-**{hr_name}** — Authorized Signatory
+
+**{hr_name}** – Authorized Signatory 
 
 ---
 
 # Annexure A - Compensation Structure
 
-**Employee Name:** {employee_full_name}
-**Designation:** {designation}
+**Annexure A**
 
 | Components | Monthly Salary |
 | --- | --- |
@@ -275,34 +274,37 @@ I, {employee_full_name}, have read and understood the terms and conditions outli
 **Allowances**
 | Components | Monthly |
 | --- | --- |
-| Meal Allowance | 1,100 |
+| Meal Allowance | 1100 |
 | Leave Travel Allowance(LTA)* | 4.81% of Basic |
-| Broadband Allowance | 1,000 |
+| Broadband Allowance | 1000 |
 
 **Benefits**
 | Components | Monthly |
 | --- | --- |
-| Employee Provident Fund(EPF)** | 1,800 |
-| Insurance Premium*** | 2,000 |
+| Employee Provident Fund(EPF)**- Company's Contribution | 1800 |
+| Insurance Premium*** | 2000 |
 
 **Monthly CTC:** {monthly_ctc}
 **Annual CTC:** {annual_ctc}
 
 *Payable in March
-**Provident Fund (PF): Company's PF registration is underway. Once active, both you and the Company will contribute equally each month as per statutory guidelines.
-*** Insurance Coverage: You will be covered under our Group Insurance Policy as per company norms. For details on coverage or benefits, please connect with the Talent Management Team.
+**Provident Fund (PF):
+Company's PF registration is underway. Once active, both you and the Company will contribute equally each month as per statutory guidelines.
+*** Insurance Coverage:
+You will be covered under our Group Insurance Policy as per company norms. For details on coverage or benefits, please connect with the Talent Management Team.
 
 ---
 
-# Annexure B - Declaration of Legal/Medical Information
+# Annexure B – Declaration of Legal/Medical Information
 
 If you have any disclosures to make regarding legal proceedings or medical conditions, please provide details below. If not applicable, please write 'N/A'.
 
-1. Legal/Criminal/Civil Proceedings (if any): ___________
-2. Major Surgeries / Medical Conditions (if any): ___________
+1. Legal/Criminal/Civil Proceedings (if any): _____________________________________________
 
-**Signature:** ___________
-**Date:** {declaration_date}
+2. Major Surgeries / Medical Conditions (if any): _________________________________________
+
+**Signature:** _______________________
+**Date:** ___________________________
 `;
 
 // ==========================================

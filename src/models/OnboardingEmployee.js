@@ -64,6 +64,7 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     designation: { type: String, default: '' },
     department: { type: String, default: '' },
     joiningDate: { type: Date },
+    offerDate: { type: Date },
     documentDeadline: { type: Date },
     workLocation: { type: String, default: '' },
     address: { type: String, default: '' },

@@ -57,6 +57,7 @@ router.get('/employees/:id', protect, requireOnboarding, onboardingController.ge
 router.patch('/employees/:id', protect, requireOnboarding, onboardingController.updateEmployee);
 router.post('/employees/:id/regenerate-credentials', protect, requireOnboarding, onboardingController.regenerateCredentials);
 router.post('/employees/:id/send-onboarding-email', protect, requireOnboarding, onboardingController.sendPreOnboardingEmail);
+router.post('/employees/:id/send-custom-file', protect, requireOnboarding, upload.single('document'), onboardingController.sendCustomFile);
 router.patch('/employees/:id/documents/:docId/flag', protect, requireOnboarding, onboardingController.flagDocument);
 router.patch('/employees/:id/documents/:docId/approve', protect, requireOnboarding, onboardingController.approveDocument);
 router.post('/employees/:id/extension/:extId/resolve', protect, requireOnboarding, onboardingController.resolveExtensionRequest);
@@ -72,6 +73,7 @@ router.post('/settings/templates/upload', protect, requireOnboarding, upload.sin
 router.post('/settings/templates/dynamic/upload', protect, requireOnboarding, upload.single('document'), onboardingController.addDynamicTemplate);
 router.delete('/settings/templates/dynamic/:templateId', protect, requireOnboarding, onboardingController.deleteDynamicTemplate);
 router.get('/settings/templates/:type/preview', protect, requireOnboarding, onboardingController.getTemplatePreview);
+router.delete('/settings/templates/:type', protect, requireOnboarding, onboardingController.deleteBaseTemplate);
 router.get('/settings/templates/:type/download', protect, requireOnboarding, onboardingController.downloadTemplate);
 
 // --- Policies ---

@@ -398,6 +398,8 @@ exports.getTeamAttendanceReport = async (req, res) => {
             userFilter.reportingManagers = req.user._id;
         }
 
+        const teamMembers = await User.find(userFilter).select('_id firstName lastName employeeCode designation profileImage').lean();
+
         let attendanceQuery = { user: { $in: teamMembers.map(m => m._id) }, companyId: req.companyId };
 
         if (year && month) {
