@@ -31,7 +31,7 @@ const startEscalationCron = (io) => {
 
                 if (workHoursElapsed >= thresholdHours) {
                     const oldAssignee = query.assignedTo;
-                    console.log(`[CRON] Escalating Query ${query.queryId} (${diffHours.toFixed(2)} hours old, Threshold: ${thresholdHours}h)`);
+                    console.log(`[CRON] Escalating Query ${query.queryId} (${workHoursElapsed.toFixed(2)} hours old, Threshold: ${thresholdHours}h)`);
 
                     query.status = 'Escalated';
                     query.escalatedAt = now;
