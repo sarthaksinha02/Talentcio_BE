@@ -6,6 +6,7 @@ const LeaveBalance = require('../models/LeaveBalance'); // Added for balance rec
 // @access  Public (Authenticated)
 const getLeavePolicies = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=60');
         console.log(`[LeaveConfig] GET policies for company: ${req.companyId}`);
         const policies = await LeaveConfig.find({ isActive: true, companyId: req.companyId });
         res.json(policies);

@@ -2,16 +2,19 @@ const User = require('../models/User');
 const Role = require('../models/Role');
 const { HiringRequest } = require('../models/HiringRequest');
 const Candidate = require('../models/Candidate');
+const Company = require('../models/Company');
+const Permission = require('../models/Permission');
 
 // @desc    Get All Users
 // @route   GET /api/users
-// @access  Private (Admin)
+// @access  Private (Admin) 
 const getUsers = async (req, res) => {
     try {
         const users = await User.find({ companyId: req.companyId })
-            .select('-password -company')
+            .select('firstName lastName email roles reportingManagers employeeProfile department workLocation employmentType employeeCode joiningDate isActive profilePicture createdAt updatedAt')
             .populate({
                 path: 'roles',
+                select: 'name permissions',
                 populate: { path: 'permissions', select: 'key' }
             })
             .populate('reportingManagers', 'firstName lastName email')
@@ -168,7 +171,7 @@ const updateUser = async (req, res) => {
 const getMyTeam = async (req, res) => {
     try {
         const team = await User.find({ reportingManagers: req.user._id, companyId: req.companyId })
-            .select('-password')
+            .select('firstName lastName email roles reportingManagers employeeProfile department workLocation employmentType employeeCode joiningDate isActive profilePicture createdAt updatedAt')
             .populate('roles', 'name')
             .populate('reportingManagers', 'firstName lastName email')
             .populate('employeeProfile', 'hris')
@@ -182,110 +185,78 @@ const getMyTeam = async (req, res) => {
 
 const getMyself = async (req, res) => {
     try {
-        const query = { _id: req.user._id };
-        if (req.companyId) query.companyId = req.companyId;
-        const user = await User.findOne(query)
-            .select('-password -tokenVersion -dossierStatus -employeeProfile')
-            .populate({
-                path: 'roles',
-                select: 'name',
-                populate: { path: 'permissions', select: 'key' }   // Only fetch the key, nothing else
-            })
-            .populate('reportingManagers', 'firstName lastName email')
-            .lean();
+        const effectiveCompanyId = req.companyId || req.user?.companyId;
+        const roles = req.user.roles || [];
+        const roleNames = roles.map(role => role.name);
+        let permissions = [...new Set(req.user.permissions || [])];
+        let hasAllPermissions = permissions.includes('*');
 
-        if (!user) {
-            return res.status(404).json({ message: 'User not found in this workspace context' });
-        }
+        const [
+            totalPerms,
+            directReportsCount,
+            subordinates,
+            taCount,
+            reportingManagers,
+            company
+        ] = await Promise.all([
+            hasAllPermissions ? Promise.resolve(0) : Permission.countDocuments({ key: { $ne: '*' } }),
+            User.countDocuments({ reportingManagers: req.user._id, companyId: effectiveCompanyId }),
+            User.find({ reportingManagers: req.user._id, companyId: effectiveCompanyId })
+                .select('firstName lastName email department')
+                .lean(),
+            HiringRequest.countDocuments({
+                companyId: effectiveCompanyId,
+                $or: [
+                    { createdBy: req.user._id },
+                    { 'ownership.hiringManager': req.user._id },
+                    { 'ownership.recruiter': req.user._id }
+                ]
+            }),
+            User.findById(req.user._id).select('reportingManagers').populate('reportingManagers', 'firstName lastName email').lean(),
+            req.company
+                ? Promise.resolve(req.company)
+                : Company.findById(effectiveCompanyId)
+                    .select('name subdomain email timezone status enabledModules settings logo themeColor planId')
+                    .lean()
+        ]);
 
-        
-        const effectiveCompanyId = req.companyId || user?.companyId;
-// Flatten unique permission keys (same logic as loginUser)
-        let permissions = [...new Set(
-            user.roles.flatMap(role => (role.permissions || []).filter(p => p).map(p => p.key))
-        )];
-
-        let hasAllPermissions = false;
-        const Permission = require('../models/Permission');
-        let totalPerms = 0, directReportsCount = 0, subordinates = [], taCount = 0;
-
-        if (permissions.includes('*')) {
+        if (hasAllPermissions) {
+            const allPermissions = await Permission.find({}).select('key').lean();
+            permissions = [...new Set([...permissions, ...allPermissions.map(p => p.key)])];
+        } else if (totalPerms > 0 && permissions.length >= totalPerms) {
             hasAllPermissions = true;
-            const allPermissions = await Permission.find({ companyId: effectiveCompanyId });
-            const allKeys = allPermissions.map(p => p.key);
-            permissions = [...new Set([...permissions, ...allKeys])];
-
-            // Because we don't need totalPerms, we just fetch the others concurrently
-            [directReportsCount, subordinates, taCount] = await Promise.all([
-                User.countDocuments({ reportingManagers: req.user._id, companyId: effectiveCompanyId }),
-                User.find({ reportingManagers: req.user._id, companyId: effectiveCompanyId }).select('firstName lastName email role department'),
-                HiringRequest.countDocuments({
-                    companyId: effectiveCompanyId,
-                    $or: [
-                        { createdBy: req.user._id },
-                        { 'ownership.hiringManager': req.user._id },
-                        { 'ownership.recruiter': req.user._id }
-                    ]
-                })
-            ]);
-        } else {
-            // Fetch everything concurrently
-            [totalPerms, directReportsCount, subordinates, taCount] = await Promise.all([
-                Permission.countDocuments({ key: { $ne: '*' }, companyId: effectiveCompanyId }),
-                User.countDocuments({ reportingManagers: req.user._id, companyId: effectiveCompanyId }),
-                User.find({ reportingManagers: req.user._id, companyId: effectiveCompanyId }).select('firstName lastName email role department'),
-                HiringRequest.countDocuments({
-                    companyId: effectiveCompanyId,
-                    $or: [
-                        { createdBy: req.user._id },
-                        { 'ownership.hiringManager': req.user._id },
-                        { 'ownership.recruiter': req.user._id }
-                    ]
-                })
-            ]);
-
-            if (totalPerms > 0 && permissions.length >= totalPerms) {
-                hasAllPermissions = true;
-            }
         }
 
         let isInterviewer = false;
-        let interviewCount = 0;
         
         // Final concurrent batch for TA/Interviewer checks if not already determined
         if (taCount === 0 && !permissions.includes('ta.view') && !permissions.includes('*')) {
-            interviewCount = await Candidate.countDocuments({ 
+            const interviewCount = await Candidate.countDocuments({ 
                 'interviewRounds.assignedTo': req.user._id, 
                 companyId: effectiveCompanyId 
             });
             isInterviewer = interviewCount > 0;
         }
 
-        // Always fetch company to ensure enabledModules are included.
-        // req.company is set by tenantMiddleware when subdomain is present.
-        // On localhost (no subdomain), fall back to user's own companyId.
-        const Company = require('../models/Company');
-        const company = req.company || await Company.findById(effectiveCompanyId).lean();
-
         res.json({
             // Core identity
-            _id: user._id,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            email: user.email,
-            profilePicture: user.profilePicture,
-            employeeCode: user.employeeCode,
-            department: user.department,
-            workLocation: user.workLocation,
-            employmentType: user.employmentType,
-            joiningDate: user.joiningDate,
-            isActive: user.isActive,
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt,
-            reportingManagers: user.reportingManagers,
+            _id: req.user._id,
+            firstName: req.user.firstName,
+            lastName: req.user.lastName,
+            email: req.user.email,
+            profilePicture: req.user.profilePicture,
+            employeeCode: req.user.employeeCode,
+            department: req.user.department,
+            workLocation: req.user.workLocation,
+            employmentType: req.user.employmentType,
+            joiningDate: req.user.joiningDate,
+            isActive: req.user.isActive,
+            createdAt: req.user.createdAt,
+            updatedAt: req.user.updatedAt,
+            reportingManagers: reportingManagers?.reportingManagers || [],
             // Auth & access control
-            roles: user.roles.map(r => r.name),
-            roleNames: user.roles.map(r => r.name),
+            roles: roleNames,
+            roleNames,
             permissions,
             hasAllPermissions,
             directReports: subordinates,
@@ -302,7 +273,7 @@ const getMyself = async (req, res) => {
 const getUserById = async (req, res) => {
     try {
         const user = await User.findOne({ _id: req.params.id, companyId: req.companyId })
-            .select('-password -company')
+            .select('firstName lastName email roles reportingManagers department workLocation employmentType employeeCode joiningDate isActive profilePicture createdAt updatedAt')
             .populate('roles', 'name')
             .populate('reportingManagers', 'firstName lastName email')
             .lean();
@@ -315,7 +286,7 @@ const getUserById = async (req, res) => {
         const directReports = await User.find({ 
             reportingManagers: user._id, 
             companyId: req.companyId 
-        }).select('_id firstName lastName email');
+        }).select('_id firstName lastName email').lean();
 
         user.directReports = directReports;
 

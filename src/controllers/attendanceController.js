@@ -10,6 +10,28 @@ const LeaveRequest = require('../models/LeaveRequest');
 const LeaveConfig = require('../models/LeaveConfig');
 const NotificationService = require('../services/notificationService');
 
+const getTimesheetPeriodIdForDate = (dateValue, cycle = 'Monthly') => {
+    const date = new Date(dateValue);
+    if (cycle === 'Weekly') return format(date, "yyyy-'W'II");
+    if (cycle === 'Daily') return format(date, 'yyyy-MM-dd');
+    return format(date, 'yyyy-MM');
+};
+
+const ensureTimesheetPeriodEditable = async ({ company, companyId, userId, dateValue }) => {
+    const cycle = company?.settings?.timesheet?.approvalCycle || 'Monthly';
+    const periodId = getTimesheetPeriodIdForDate(dateValue, cycle);
+    const timesheet = await Timesheet.findOne({ user: userId, month: periodId, companyId }).select('status').lean();
+
+    if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
+        return {
+            ok: false,
+            message: `Cannot modify attendance for a ${timesheet.status.toLowerCase()} timesheet period.`
+        };
+    }
+
+    return { ok: true };
+};
+
 // Helper to get time in IST
 const getISTTime = () => {
     return new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
@@ -271,6 +293,17 @@ exports.updateAttendance = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to update this attendance record' });
         }
 
+        const company = req.company || await Company.findById(req.companyId).select('settings.timesheet').lean();
+        const editability = await ensureTimesheetPeriodEditable({
+            company,
+            companyId: req.companyId,
+            userId: attendance.user?._id || attendance.user,
+            dateValue: attendance.date
+        });
+        if (!editability.ok) {
+            return res.status(400).json({ message: editability.message });
+        }
+
         if (clockIn) {
             attendance.clockIn = new Date(clockIn);
             attendance.clockInIST = new Date(clockIn).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
@@ -307,6 +340,17 @@ exports.createAttendance = async (req, res) => {
             if (!isManager) {
                 return res.status(403).json({ message: 'Not authorized to create attendance for this user' });
             }
+        }
+
+        const company = req.company || await Company.findById(req.companyId).select('settings.timesheet').lean();
+        const editability = await ensureTimesheetPeriodEditable({
+            company,
+            companyId: req.companyId,
+            userId: targetUserId,
+            dateValue: date
+        });
+        if (!editability.ok) {
+            return res.status(400).json({ message: editability.message });
         }
 
         const newAttendance = new Attendance({

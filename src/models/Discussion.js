@@ -36,4 +36,6 @@ const discussionSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+discussionSchema.index({ supervisor: 1, companyId: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Discussion', discussionSchema);

@@ -6,6 +6,7 @@ const { upload } = require('../config/cloudinary');
 const onboardingController = require('../controllers/onboardingController');
 const OnboardingEmployee = require('../models/OnboardingEmployee');
 const jwt = require('jsonwebtoken');
+const { getOnboardingBootstrap } = require('../controllers/pageBootstrapController');
 
 // ==========================================
 // Onboarding Token Auth Middleware
@@ -52,6 +53,7 @@ const requireOnboarding = authorize('onboarding.manage');
 
 router.post('/employees', protect, requireOnboarding, onboardingController.addEmployee);
 router.post('/employees/bulk', protect, requireOnboarding, onboardingController.bulkAddEmployees);
+router.get('/bootstrap', protect, requireOnboarding, getOnboardingBootstrap);
 router.get('/employees', protect, requireOnboarding, onboardingController.getOnboardingList);
 router.get('/employees/:id', protect, requireOnboarding, onboardingController.getOnboardingEmployee);
 router.patch('/employees/:id', protect, requireOnboarding, onboardingController.updateEmployee);

@@ -6,18 +6,17 @@ const authorize = (permissionKey) => {
 
         // Super Admin Bypass (optional, but good for boostrapping)
         // Check if user has a role with isSystem: true or name "System Admin"
-        const isSuperAdmin = req.user.roles.some(role => role.isSystem || role.name === 'System Admin' || (role.permissions || []).some(p => p && p.key === '*'));
+        const isSuperAdmin = (req.user.roles || []).some(role =>
+            role.isSystem ||
+            role.name === 'System Admin' ||
+            (role.permissions || []).some(p => p && p.key === '*')
+        );
         if (isSuperAdmin) {
             return next();
         }
 
-        // Check user permissions
-        // req.user.roles is populated with permissions
-        const userPermissions = req.user.roles.flatMap(role =>
-            (role.permissions || []).filter(p => p).map(p => p.key)
-        );
-
         const requiredPermissions = Array.isArray(permissionKey) ? permissionKey : [permissionKey];
+        const userPermissions = req.user.permissions || [];
 
         const hasPermission = requiredPermissions.some(p => userPermissions.includes(p));
 

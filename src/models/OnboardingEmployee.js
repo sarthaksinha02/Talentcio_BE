@@ -235,11 +235,11 @@ onboardingEmployeeSchema.methods.matchPassword = async function (enteredPassword
 onboardingEmployeeSchema.statics.generateTempId = async function (companyId) {
     const year = new Date().getFullYear();
     const prefix = `EMP-${year}-`;
-    
+
     // Find the record with the highest numeric suffix for this year
-    const lastEmployee = await this.findOne({ 
-        companyId, 
-        tempEmployeeId: { $regex: new RegExp(`^${prefix}`) } 
+    const lastEmployee = await this.findOne({
+        companyId,
+        tempEmployeeId: { $regex: new RegExp(`^${prefix}`) }
     }).sort({ tempEmployeeId: -1 });
 
     let lastNumber = 0;

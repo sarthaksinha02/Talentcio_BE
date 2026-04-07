@@ -72,5 +72,6 @@ const leaveRequestSchema = new mongoose.Schema({
 leaveRequestSchema.index({ companyId: 1, user: 1, createdAt: -1 });
 leaveRequestSchema.index({ user: 1, createdAt: -1 });
 leaveRequestSchema.index({ status: 1, user: 1 }); // For team approvals (pending status + subordinate ids)
+leaveRequestSchema.index({ companyId: 1, status: 1, startDate: 1 });
 
 module.exports = mongoose.model('LeaveRequest', leaveRequestSchema);

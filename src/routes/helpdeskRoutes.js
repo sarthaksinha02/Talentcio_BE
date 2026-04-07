@@ -16,6 +16,7 @@ const {
     updateQueryType,
     deleteQueryType
 } = require('../controllers/helpdeskController');
+const { getHelpdeskBootstrap } = require('../controllers/pageBootstrapController');
 
 // All helpdesk routes require authentication
 router.use(protect);
@@ -29,6 +30,7 @@ router.delete('/types/:id', deleteQueryType);
 
 // Ticket routes
 router.post('/', createQuery);
+router.get('/bootstrap', getHelpdeskBootstrap);
 router.get('/all', getAllQueries); // Must be above /:id
 router.get('/my-queries', getMyQueries);
 router.get('/assigned', getAssignedQueries);

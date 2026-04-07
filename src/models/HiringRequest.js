@@ -114,6 +114,9 @@ const HiringRequestSchema = new mongoose.Schema({
 // Performance Indexes
 HiringRequestSchema.index({ companyId: 1, status: 1, createdAt: -1 });
 HiringRequestSchema.index({ createdBy: 1, companyId: 1, createdAt: -1 });
+HiringRequestSchema.index({ 'ownership.recruiter': 1, companyId: 1, status: 1 });
+HiringRequestSchema.index({ 'ownership.hiringManager': 1, companyId: 1, status: 1 });
+HiringRequestSchema.index({ 'approvalChain.approvers': 1, companyId: 1, status: 1 });
 
 // Audit Logs for this specific request
 const HRRAuditLogSchema = new mongoose.Schema({

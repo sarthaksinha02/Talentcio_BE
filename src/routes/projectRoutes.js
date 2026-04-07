@@ -11,10 +11,12 @@ const {
     getTasks, createTask, updateTask, deleteTask,
     getEmployees
 } = require('../controllers/projectController');
+const { getProjectBootstrap } = require('../controllers/pageBootstrapController');
 
 router.use(protect);
 
 // Helpers
+router.get('/bootstrap', requireModule('projectManagement'), getProjectBootstrap);
 router.get('/employees', requireModule('projectManagement'), getEmployees);
 
 // Business Units

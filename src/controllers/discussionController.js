@@ -3,6 +3,10 @@ const User = require('../models/User');
 const Notification = require('../models/Notification');
 const mongoose = require('mongoose');
 
+const setPrivateCache = (res, maxAgeSeconds = 30) => {
+    res.set('Cache-Control', `private, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds}`);
+};
+
 exports.createDiscussion = async (req, res) => {
     try {
         const { title, discussion, status, dueDate, supervisor } = req.body;
@@ -43,6 +47,7 @@ exports.createDiscussion = async (req, res) => {
 
 exports.getDiscussions = async (req, res) => {
     try {
+        setPrivateCache(res, 30);
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
@@ -136,6 +141,7 @@ exports.deleteDiscussion = async (req, res) => {
 
 exports.getSupervisorList = async (req, res) => {
     try {
+        setPrivateCache(res, 60);
         const users = await User.find({ companyId: req.companyId, isActive: true })
             .select('firstName lastName email profilePicture')
             .sort({ firstName: 1 });

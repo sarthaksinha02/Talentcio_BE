@@ -1,6 +1,23 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+const AUTH_CACHE_TTL_MS = 5000;
+const authUserCache = new Map();
+
+const getCacheKey = (userId, tokenVersion) => `${userId}:${tokenVersion || 0}`;
+
+const cloneCachedUser = (user) => ({
+    ...user,
+    roles: Array.isArray(user.roles) ? user.roles.map(role => ({
+        ...role,
+        permissions: Array.isArray(role.permissions) ? role.permissions.map(permission => ({ ...permission })) : []
+    })) : [],
+    reportingManagers: Array.isArray(user.reportingManagers)
+        ? user.reportingManagers.map(manager => ({ ...manager }))
+        : [],
+    permissions: Array.isArray(user.permissions) ? [...user.permissions] : []
+});
+
 const protect = async (req, res, next) => {
     let token;
 
@@ -14,24 +31,47 @@ const protect = async (req, res, next) => {
 
             // Verify token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const tokenVersion = decoded.tokenVersion || 0;
+            const cacheKey = getCacheKey(decoded.id, tokenVersion);
+            const cachedEntry = authUserCache.get(cacheKey);
 
-            // Get user from the token
-            req.user = await User.findById(decoded.id)
-                .select('-password -company')
-                .populate({
-                    path: 'roles',
-                    populate: {
-                        path: 'permissions'
-                    }
-                }).populate('reportingManagers', 'firstName lastName')
-                .lean();
-            
-            if (req.user && req.user.roles) {
-                req.user.permissions = [...new Set(
-                    req.user.roles.flatMap(role => 
-                        (role.permissions || []).map(p => typeof p === 'object' ? p.key : p)
-                    )
-                )];
+            if (cachedEntry && (Date.now() - cachedEntry.cachedAt) < AUTH_CACHE_TTL_MS) {
+                req.user = cloneCachedUser(cachedEntry.user);
+            } else {
+                // Keep auth hydration minimal because every protected API pays this cost.
+                req.user = await User.findById(decoded.id)
+                    .select('firstName lastName email roles reportingManagers companyId tokenVersion joiningDate isActive department workLocation employmentType employeeCode profilePicture createdAt updatedAt')
+                    .populate({
+                        path: 'roles',
+                        select: 'name isSystem permissions',
+                        populate: {
+                            path: 'permissions',
+                            select: 'key'
+                        }
+                    })
+                    .lean();
+
+                if (!req.user) {
+                    return res.status(401).json({ message: 'Not authorized, user not found' });
+                }
+
+                if (req.user && req.user.roles) {
+                    req.user.permissions = [...new Set(
+                        req.user.roles.flatMap(role => 
+                            (role.permissions || []).map(p => typeof p === 'object' ? p.key : p)
+                        )
+                    )];
+                }
+
+                // Ensure roles is always an array
+                if (req.user && !req.user.roles) {
+                    req.user.roles = [];
+                }
+
+                authUserCache.set(cacheKey, {
+                    cachedAt: Date.now(),
+                    user: cloneCachedUser(req.user)
+                });
             }
 
             // Ensure roles is always an array
@@ -55,16 +95,12 @@ const protect = async (req, res, next) => {
                 req.companyId = req.user.companyId;
             }
 
-            if (!req.user) {
-                return res.status(401).json({ message: 'Not authorized, user not found' });
-            }
-
             // Check Token Version
             // Treat missing version as 0 for backward compatibility during migration
-            const tokenVersion = decoded.tokenVersion || 0;
             const userVersion = req.user.tokenVersion || 0;
 
             if (tokenVersion !== userVersion) {
+                authUserCache.delete(cacheKey);
                 return res.status(401).json({ message: 'Not authorized, session expired (Role/Permission changed)' });
             }
 

@@ -455,6 +455,7 @@ exports.bulkAddEmployees = async (req, res) => {
 // --- Get all onboarding employees ---
 exports.getOnboardingList = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=30');
         const { status, page = 1, limit = 20, search } = req.query;
         let query = { companyId: req.companyId };
 
@@ -1211,6 +1212,7 @@ exports.submitOnboarding = async (req, res) => {
 // GET /api/onboarding/settings
 exports.getOnboardingSettings = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=60');
         const company = await Company.findById(req.companyId).select('settings.onboarding');
         res.json(company.settings.onboarding || { offerLetterTemplateUrl: '', declarationTemplateUrl: '' });
     } catch (error) {

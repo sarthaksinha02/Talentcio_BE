@@ -7,9 +7,14 @@ const Task = require('../models/Task');
 
 const User = require('../models/User');
 
+const hasPermission = (req, permission) => (req.user.permissions || []).includes(permission);
+const hasAnyPermission = (req, permissions) => permissions.some(permission => hasPermission(req, permission));
+const isAdminUser = (req) => (req.user.roles || []).some(r => r.name === 'Admin');
+
 // --- Employees (Helper for Dropdowns) ---
 const getEmployees = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=45, stale-while-revalidate=45');
         const users = await User.find({ companyId: req.companyId })
             .select('firstName lastName email')
             .lean();
@@ -22,6 +27,7 @@ const getEmployees = async (req, res) => {
 // --- Business Units ---
 const getBusinessUnits = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=60');
         const units = await BusinessUnit.find({ companyId: req.companyId })
             .populate('headOfUnit', 'firstName lastName')
             .lean();
@@ -56,6 +62,7 @@ const updateBusinessUnit = async (req, res) => {
 // --- Clients ---
 const getClients = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=60');
         const clients = await Client.find({ companyId: req.companyId })
             .populate('businessUnit', 'name')
             .lean();
@@ -90,6 +97,7 @@ const updateClient = async (req, res) => {
 // --- Projects (Enhanced) ---
 const getProjects = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=45, stale-while-revalidate=45');
         // If user is basic employee, maybe we want to filter? 
         // For now, adhering to 'project.read' permission check in route.
         // If Admin, fetch all. If not, fetch only assigned projects (manager, member, or has assigned task)
@@ -97,11 +105,9 @@ const getProjects = async (req, res) => {
 
         // Check if user is Admin
         // Check if user is Admin or has global read permission
-        const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
-            req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
-
-        const canViewAssigned = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_assigned'));
-        const canViewTeam = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_team'));
+        const canViewAll = isAdminUser(req) || hasPermission(req, 'project.read');
+        const canViewAssigned = hasPermission(req, 'project.view_assigned');
+        const canViewTeam = hasPermission(req, 'project.view_team');
 
         if (canViewAll) {
             // Fetch all projects
@@ -118,7 +124,7 @@ const getProjects = async (req, res) => {
 
             // 2. Team Projects
             if (canViewTeam) {
-                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
+                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id').lean();
                 const reportIds = directReports.map(u => u._id);
 
                 if (reportIds.length > 0) {
@@ -161,13 +167,10 @@ const getProjectHierarchy = async (req, res) => {
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
         // Security Check
-        const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
-            req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
-
-        const canViewAssigned = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_assigned'));
-        const canViewTeam = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_team'));
-
-        const canLogTime = req.user.permissions.includes('timesheet.submit') || req.user.permissions.includes('timesheet.create');
+        const canViewAll = isAdminUser(req) || hasPermission(req, 'project.read');
+        const canViewAssigned = hasPermission(req, 'project.view_assigned');
+        const canViewTeam = hasPermission(req, 'project.view_team');
+        const canLogTime = hasAnyPermission(req, ['timesheet.submit', 'timesheet.create']);
         
         // Strict Check: If not Admin/Read, MUST have view_assigned, view_team, OR be able to log time
         if (!canViewAll && !canViewAssigned && !canViewTeam && !canLogTime) {
@@ -201,7 +204,7 @@ const getProjectHierarchy = async (req, res) => {
 
             // 2. Check Team Access
             if (!hasAccess && canViewTeam) {
-                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
+                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id').lean();
                 const reportIds = directReports.map(u => u._id.toString());
 
                 if (reportIds.length > 0) {
@@ -246,7 +249,7 @@ const getProjectHierarchy = async (req, res) => {
 
         let workLogs = [];
         const canViewWorkLogs = canViewAll ||
-            req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_work_logs'));
+            hasPermission(req, 'project.view_work_logs');
 
         // Logic: 
         // 1. Admin/Global Read -> See all.
@@ -355,13 +358,10 @@ const getModules = async (req, res) => {
         const project = await Project.findOne({ _id: projectId, companyId: req.companyId });
         if (!project) return res.status(404).json({ message: 'Project not found' });
 
-        const canViewAll = req.user.roles.some(r => r.name === 'Admin') ||
-            req.user.roles.some(r => r.permissions.some(p => p.key === 'project.read'));
-
-        const canViewAssigned = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_assigned'));
-        const canViewTeam = req.user.roles.some(r => r.permissions.some(p => p.key === 'project.view_team'));
-
-        const canLogTime = req.user.permissions.includes('timesheet.submit') || req.user.permissions.includes('timesheet.create');
+        const canViewAll = isAdminUser(req) || hasPermission(req, 'project.read');
+        const canViewAssigned = hasPermission(req, 'project.view_assigned');
+        const canViewTeam = hasPermission(req, 'project.view_team');
+        const canLogTime = hasAnyPermission(req, ['timesheet.submit', 'timesheet.create']);
         
         // Strict Check: If not Admin/Read, MUST have view_assigned, view_team, OR be able to log time
         if (!canViewAll && !canViewAssigned && !canViewTeam && !canLogTime) {
@@ -385,7 +385,7 @@ const getModules = async (req, res) => {
 
             // 2. Check Team Access
             if (!hasAccess && canViewTeam) {
-                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
+                const directReports = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id').lean();
                 const reportIds = directReports.map(u => u._id.toString());
                 if (reportIds.length > 0) {
                     const reportIsManager = project.manager && reportIds.includes(project.manager.toString());

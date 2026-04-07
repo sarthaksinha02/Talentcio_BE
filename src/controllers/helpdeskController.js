@@ -5,11 +5,16 @@ const Company = require('../models/Company');
 const NotificationService = require('../services/notificationService');
 const { calculateWorkHours } = require('../services/helpdeskUtils');
 
+const setPrivateCache = (res, maxAgeSeconds = 30) => {
+    res.set('Cache-Control', `private, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds}`);
+};
+
 
 // === QUERY TYPE MANAGEMENT ===
 
 exports.getQueryTypes = async (req, res) => {
     try {
+        setPrivateCache(res, 60);
         const types = await QueryType.find({
             $or: [
                 { companyId: req.companyId },
@@ -149,6 +154,7 @@ exports.createQuery = async (req, res) => {
 
 exports.getMyQueries = async (req, res) => {
     try {
+        setPrivateCache(res, 20);
         const queries = await HelpdeskQuery.find({ raisedBy: req.user._id, companyId: req.companyId })
             .populate('queryType', 'name')
             .populate('assignedTo', 'firstName lastName email')
@@ -164,6 +170,7 @@ exports.getMyQueries = async (req, res) => {
 
 exports.getAssignedQueries = async (req, res) => {
     try {
+        setPrivateCache(res, 20);
         const queries = await HelpdeskQuery.find({ assignedTo: req.user._id, companyId: req.companyId })
             .populate('raisedBy', 'firstName lastName email')
             .populate('queryType', 'name')
@@ -179,6 +186,7 @@ exports.getAssignedQueries = async (req, res) => {
 
 exports.getAllQueries = async (req, res) => {
     try {
+        setPrivateCache(res, 20);
         const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
         
         console.log(`[HelpDesk Debug] User: ${req.user.email}, Roles: ${JSON.stringify(req.user.roles.map(r => r.name || r))}, IsAdmin: ${isAdmin}, CompanyId: ${req.companyId}`);
@@ -201,6 +209,7 @@ exports.getAllQueries = async (req, res) => {
 
 exports.getEscalatedQueries = async (req, res) => {
     try {
+        setPrivateCache(res, 20);
         const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
         if (!isAdmin) return res.status(403).json({ success: false, message: 'Admins only' });
 

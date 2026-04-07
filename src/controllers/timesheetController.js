@@ -7,6 +7,13 @@ const WorkLog = require('../models/WorkLog');
 const Task = require('../models/Task');
 const Module = require('../models/Module');
 
+const getTimesheetPeriodIdForDate = (dateValue, cycle = 'Monthly') => {
+    const date = new Date(dateValue);
+    if (cycle === 'Weekly') return format(date, "yyyy-'W'II");
+    if (cycle === 'Daily') return format(date, 'yyyy-MM-dd');
+    return format(date, 'yyyy-MM');
+};
+
 // @desc    Get Current Month Timesheet
 // @route   GET /api/timesheet/current
 // @access  Private
@@ -154,14 +161,7 @@ const addEntry = async (req, res) => {
 
         // Check for Existing Timesheet Logic
         const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
-        let periodId;
-        if (cycle === 'Weekly') {
-            periodId = format(new Date(entryDate), "yyyy-'W'II"); // ISO Week
-        } else if (cycle === 'Daily') {
-            periodId = format(new Date(entryDate), 'yyyy-MM-dd');
-        } else {
-            periodId = format(new Date(entryDate), 'yyyy-MM');
-        }
+        const periodId = getTimesheetPeriodIdForDate(entryDate, cycle);
 
         const timesheet = await Timesheet.findOne({
             user: targetUserId,
@@ -170,15 +170,7 @@ const addEntry = async (req, res) => {
         });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-            // Admin can bypass this check if needed, but usually submitted timesheets shouldn't be touched unless rejected/reverted.
-            // Let's allow Admin to edit even if submitted? Or maybe restrict adding to DRAFT only.
-            // Requirement was "Admin can edit". Let's imply adding too.
-            // However, typically one edits a submitted timesheet by rejecting it first.
-            // Unless "Edit" implies correcting data without rejection flow.
-            // Let's allow Admin to add even if submitted, but warn or log.
-            if (!isAdmin) {
-                return res.status(400).json({ message: 'Cannot add entries to a submitted or approved timesheet.' });
-            }
+            return res.status(400).json({ message: 'Cannot add entries to a submitted or approved timesheet.' });
         }
 
         // Check Joining Date
@@ -639,13 +631,12 @@ const updateEntry = async (req, res) => {
             return res.status(403).json({ message: 'Not authorized' });
         }
 
-        const month = format(workLog.date, 'yyyy-MM');
-        const timesheet = await Timesheet.findOne({ user: owner._id, month, companyId: req.companyId });
+        const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
+        const periodId = getTimesheetPeriodIdForDate(workLog.date, cycle);
+        const timesheet = await Timesheet.findOne({ user: owner._id, month: periodId, companyId: req.companyId });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-            if (!isManager && !isAdmin) {
-                return res.status(400).json({ message: 'Cannot edit submitted/approved timesheets' });
-            }
+            return res.status(400).json({ message: 'Cannot edit submitted/approved timesheets' });
         }
 
         // Check Joining Date

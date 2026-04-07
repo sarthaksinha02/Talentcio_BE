@@ -271,7 +271,11 @@ candidateSchema.index({ hiringRequestId: 1, email: 1 }, { unique: true });
 
 // Performance Indexes
 candidateSchema.index({ hiringRequestId: 1, status: 1 });
+candidateSchema.index({ hiringRequestId: 1, decision: 1 });
+candidateSchema.index({ hiringRequestId: 1, phase2Decision: 1 });
+candidateSchema.index({ hiringRequestId: 1, phase3Decision: 1 });
 candidateSchema.index({ companyId: 1, createdAt: -1 });
+candidateSchema.index({ companyId: 1, 'interviewRounds.assignedTo': 1 });
 
 
 

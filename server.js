@@ -3,7 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const mongoose = require('mongoose');
 const connectDB = require('./db');
+const requestTiming = require('./src/middlewares/requestTiming');
 
 const app = express();
 const server = http.createServer(app);
@@ -52,9 +54,26 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 5000;
 
+// Log slow MongoDB queries so we can identify true database bottlenecks.
+const originalExec = mongoose.Query.prototype.exec;
+mongoose.Query.prototype.exec = async function (...args) {
+    const start = process.hrtime.bigint();
+    try {
+        return await originalExec.apply(this, args);
+    } finally {
+        const durationMs = Number(process.hrtime.bigint() - start) / 1e6;
+        if (durationMs >= 100) {
+            const query = typeof this.getQuery === 'function' ? this.getQuery() : {};
+            const options = this.options || {};
+            console.log(`[MONGO] ${this.model?.modelName || 'UnknownModel'}.${this.op} ${durationMs.toFixed(1)}ms query=${JSON.stringify(query)} options=${JSON.stringify(options)}`);
+        }
+    }
+};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(requestTiming);
 
 // Models (Register Schemas)
 require('./src/models/Permission');

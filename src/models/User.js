@@ -75,6 +75,10 @@ const userSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+userSchema.index({ companyId: 1, isActive: 1 });
+userSchema.index({ companyId: 1, department: 1 });
+userSchema.index({ companyId: 1, reportingManagers: 1 });
+
 // Encrypt password before save
 // Encrypt password before save
 userSchema.pre('save', async function () {

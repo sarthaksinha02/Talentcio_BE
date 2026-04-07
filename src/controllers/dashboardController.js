@@ -47,10 +47,13 @@ const getDashboardStats = async (req, res) => {
         ]);
 
         const absentToday = totalEmployees - presentToday;
+        const attendanceByUserId = new Map(
+            todaysAttendance.map(record => [record.user.toString(), record])
+        );
 
         // Map users to their today's attendance status
         const dailyStatusList = allUsers.map(user => {
-            const record = todaysAttendance.find(a => a.user.toString() === user._id.toString());
+            const record = attendanceByUserId.get(user._id.toString());
             const roleName = user.roles?.length > 0 ? user.roles[0].name : 'Employee';
 
             return {

@@ -6,6 +6,37 @@ const Company = require('../models/Company');
 const { calculateLeaveDays } = require('../utils/leaveUtils');
 const NotificationService = require('../services/notificationService');
 
+const parseBoolean = (value) => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') return value.toLowerCase() === 'true';
+    return false;
+};
+
+const normalizeDocuments = (documents, uploadedFile) => {
+    const normalized = [];
+
+    if (uploadedFile?.path) {
+        normalized.push(uploadedFile.path);
+    }
+
+    if (Array.isArray(documents)) {
+        normalized.push(...documents.filter(Boolean));
+    } else if (typeof documents === 'string' && documents.trim()) {
+        try {
+            const parsed = JSON.parse(documents);
+            if (Array.isArray(parsed)) {
+                normalized.push(...parsed.filter(Boolean));
+            } else {
+                normalized.push(documents);
+            }
+        } catch {
+            normalized.push(documents);
+        }
+    }
+
+    return [...new Set(normalized)];
+};
+
 
 // Helper to initialize balance dynamically based on policy
 const initializeBalance = async (userId, policy, year, companyId) => {
@@ -41,7 +72,9 @@ const initializeBalance = async (userId, policy, year, companyId) => {
 // @route   POST /api/leaves/apply
 // @access  Private
 const applyLeave = async (req, res) => {
-    const { leaveType, startDate, endDate, isHalfDay, halfDaySession, reason, documents } = req.body;
+    const { leaveType, startDate, endDate, halfDaySession, reason } = req.body;
+    const isHalfDay = parseBoolean(req.body.isHalfDay);
+    const documents = normalizeDocuments(req.body.documents, req.file);
     const userId = req.user._id;
 
     try {
@@ -195,7 +228,7 @@ const getMyLeaves = async (req, res) => {
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
-                .select('leaveType startDate endDate isHalfDay reason status createdAt daysCount')
+                .select('leaveType startDate endDate isHalfDay halfDaySession reason status createdAt daysCount documents rejectionReason')
                 .lean(),
             LeaveRequest.countDocuments({ user: req.user._id, companyId: req.companyId }),
             LeaveConfig.find({ companyId: req.companyId }).select('leaveType sandwichRule').lean()
@@ -320,7 +353,7 @@ const getManagerApprovals = async (req, res) => {
             LeaveRequest.find(query)
                 .populate('user', 'firstName lastName email employeeCode')
                 .sort({ createdAt: 1 })
-                .select('user leaveType startDate endDate daysCount reason status isHalfDay createdAt')
+                .select('user leaveType startDate endDate daysCount reason status isHalfDay halfDaySession createdAt documents rejectionReason')
                 .lean(),
             LeaveConfig.find({ companyId: req.companyId }).select('leaveType sandwichRule').lean()
         ]);
