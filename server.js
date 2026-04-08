@@ -10,6 +10,7 @@ const requestTiming = require('./src/middlewares/requestTiming');
 const app = express();
 const server = http.createServer(app);
 
+// --- CORS CONFIGURATION (MUST BE AT THE TOP) ---
 const allowedOrigins = [
     'https://telentcio.vercel.app',
     'https://talentcio.vercel.app',
@@ -20,21 +21,34 @@ const allowedOrigins = [
 
 const corsOptions = {
     origin: function (origin, callback) {
+        // Allow if no origin (like mobile or same-origin)
         if (!origin) return callback(null, true);
-        const isAllowed = allowedOrigins.some(allowed =>
-            origin === allowed || origin.includes('localhost') || origin.includes('127.0.0.1')
+        
+        const normalizedOrigin = origin.replace(/\/$/, "");
+        const isAllowed = allowedOrigins.some(allowed => 
+            normalizedOrigin === allowed.replace(/\/$/, "") || 
+            normalizedOrigin.includes('localhost') || 
+            normalizedOrigin.includes('127.0.0.1')
         );
+
         if (isAllowed) {
             callback(null, true);
         } else {
-            console.log('Blocked by CORS:', origin);
-            callback(new Error('Not allowed by CORS'));
+            // Echo back to log what precisely is being blocked
+            console.warn(`[CORS_BLOCKED] Origin: ${origin}`);
+            callback(null, false);
         }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept'],
+    optionsSuccessStatus: 204
 };
+
+// Apply CORS globally before ANY other middleware
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Explicitly handle all preflight requests
+// ----------------------------------------------
 
 // Setup Socket.IO
 const io = new Server(server, {
@@ -86,7 +100,6 @@ mongoose.Query.prototype.exec = async function (...args) {
 };
 
 // Middleware
-app.use(cors(corsOptions));
 app.use(express.json());
 app.use(requestTiming);
 
