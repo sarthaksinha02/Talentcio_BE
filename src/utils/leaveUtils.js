@@ -1,5 +1,5 @@
 const Holiday = require('../models/Holiday');
-const { eachDayOfInterval, isWeekend, isSameDay } = require('date-fns');
+const { eachDayOfInterval, format, isSameDay } = require('date-fns');
 
 /**
  * Calculate the number of leave days based on range and policy rules.
@@ -9,31 +9,41 @@ const { eachDayOfInterval, isWeekend, isSameDay } = require('date-fns');
  * @param {Array} holidays (List of holiday dates, optional optimization)
  * @returns {Number} daysCount
  */
-const calculateLeaveDays = async (startDate, endDate, leavePolicy) => {
-    // If half day, it's 0.5 regardless of range (usually half day is single date)
-    // But we handle that in controller. Here we assume full days range.
+/**
+ * Calculate the number of leave days based on range and policy rules.
+ * @param {Date} startDate 
+ * @param {Date} endDate 
+ * @param {Object} leavePolicy (LeaveConfig)
+ * @param {Array<string>} weeklyOffs (List of day names, e.g. ['Saturday', 'Sunday'])
+ * @returns {Number} daysCount
+ */
+const calculateLeaveDays = async (startDate, endDate, leavePolicy, weeklyOffs = ['Saturday', 'Sunday']) => {
+    if (!startDate || !endDate || !leavePolicy) return 0;
 
     // 1. Get all days in range
     const days = eachDayOfInterval({ start: startDate, end: endDate });
     let count = 0;
 
-    // 2. Fetch Holidays within the date range
+    // 2. Fetch Holidays within the date range for the SPECIFIC company
     const holidayDocs = await Holiday.find({
+        companyId: leavePolicy.companyId,
         date: { $gte: startDate, $lte: endDate }
     });
     const holidayDates = holidayDocs.map(h => new Date(h.date).toDateString());
 
     // 3. Iterate
     for (const day of days) {
-        const isSatSun = isWeekend(day);
-        const isHoliday = holidayDates.includes(day.toDateString());
-        const isOffDay = isSatSun || isHoliday;
+        const dateStr = day.toDateString();
+        const dayName = format(day, 'EEEE');
+        const isWeeklyOff = weeklyOffs.includes(dayName);
+        const isHoliday = holidayDates.includes(dateStr);
+        const isOffDay = isWeeklyOff || isHoliday;
 
         if (!isOffDay) {
-            // Working Day -> Always Counts
+            // Working Day -> Always Counts as Leave
             count++;
         } else {
-            // Off Day -> Counts only if Sandwich Rule is TRUE
+            // Off Day (Holiday/Weekend) -> Counts as Leave ONLY if Sandwich Rule is TRUE
             if (leavePolicy.sandwichRule) {
                 count++;
             }

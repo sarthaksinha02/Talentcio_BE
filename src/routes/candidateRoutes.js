@@ -6,6 +6,8 @@ const candidateController = require('../controllers/candidateController');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/authorize');
 const { upload } = require('../config/cloudinary');
+const multer = require('multer');
+const memoryUpload = multer({ storage: multer.memoryStorage() });
 
 router.use(protect);
 router.use(requireModule('talentAcquisition'));
@@ -14,9 +16,14 @@ router.use(requireModule('talentAcquisition'));
 // Upload resume
 router.post('/upload-resume/:hiringRequestId', protect, authorize('ta.create'), upload.single('resume'), candidateController.uploadResume);
 
+// Parse resume without uploading to Cloudinary
+router.post('/parse-resume', protect, authorize('ta.create'), memoryUpload.single('resume'), candidateController.parseResume);
+
 // Get discrete sources
 router.get('/user/:userName', protect, authorize('ta.view'), candidateController.getCandidatesByPulledBy);
 router.get('/sources', protect, authorize('ta.view'), candidateController.getCandidateSources);
+router.post('/sources', protect, authorize('ta.create'), candidateController.addCandidateSource);
+router.delete('/sources/:id', protect, authorize('ta.delete'), candidateController.deleteCandidateSource);
 
 // CRUD operations
 router.post('/', protect, authorize('ta.create'), candidateController.createCandidate);
@@ -33,6 +40,7 @@ router.patch('/:id/internal-remark', protect, candidateController.updateCandidat
 router.patch('/:id/decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updateCandidateDecision);
 router.patch('/:id/phase2-decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updatePhase2Decision);
 router.patch('/:id/phase3-decision', protect, authorize('ta.edit', 'ta.decision'), candidateController.updatePhase3Decision);
+router.post('/:id/transfer-to-onboarding', protect, authorize('ta.edit'), candidateController.transferToOnboarding);
 
 // Current User's Scheduled Interviews
 router.get('/my/interviews', protect, candidateController.getMyScheduledInterviews);

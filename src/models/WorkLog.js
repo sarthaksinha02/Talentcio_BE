@@ -37,5 +37,6 @@ const workLogSchema = new mongoose.Schema({
 
 workLogSchema.index({ companyId: 1, user: 1, date: -1 });
 workLogSchema.index({ companyId: 1, date: 1 });
+workLogSchema.index({ task: 1, companyId: 1, date: -1 });
 
 module.exports = mongoose.model('WorkLog', workLogSchema);

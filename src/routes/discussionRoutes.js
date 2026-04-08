@@ -6,13 +6,18 @@ const {
     getDiscussions,
     getDiscussionById,
     updateDiscussion,
-    deleteDiscussion
+    deleteDiscussion,
+    getSupervisorList
 } = require('../controllers/discussionController');
+const { getDiscussionsBootstrap } = require('../controllers/pageBootstrapController');
 const { protect } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/authorize');
 
 router.use(protect);
 router.use(requireModule('meetingsOfMinutes'));
+
+router.get('/bootstrap', getDiscussionsBootstrap);
+router.get('/supervisors', getSupervisorList);
 
 router.route('/')
     .get(authorize('discussion.read'), getDiscussions)

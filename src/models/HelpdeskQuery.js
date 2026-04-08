@@ -43,7 +43,7 @@ const helpdeskQuerySchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['New', 'In Progress', 'Closed', 'Escalated', 'Pending'],
+        enum: ['New', 'In Progress', 'Resolved', 'Closed', 'Escalated', 'Pending'],
         default: 'New'
     },
     raisedBy: {
@@ -56,8 +56,15 @@ const helpdeskQuerySchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    originalAssignee: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
     comments: [commentSchema],
     escalatedAt: {
+        type: Date
+    },
+    resolvedAt: {
         type: Date
     },
     closedAt: {

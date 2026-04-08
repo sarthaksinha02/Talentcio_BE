@@ -1,10 +1,15 @@
 const Holiday = require('../models/Holiday');
 
+const setPrivateCache = (res, maxAgeSeconds = 60) => {
+    res.set('Cache-Control', `private, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds}`);
+};
+
 // @desc    Get holidays (optionally filtered by month)
 // @route   GET /api/holidays?year=2026&month=2
 // @access  Private
 exports.getHolidays = async (req, res) => {
     try {
+        setPrivateCache(res, 60);
         const year = parseInt(req.query.year) || new Date().getFullYear();
         const month = parseInt(req.query.month); // 1-12, optional
 

@@ -1247,6 +1247,7 @@ exports.uploadJDFile = async (req, res) => {
 // --- getTAClients ---
 exports.getTAClients = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=60');
         const query = { companyId: req.companyId };
         
         // Find all unique client names that have hiring requests

@@ -18,6 +18,7 @@ const {
     getPermissions
 } = require('../controllers/roleController');
 const { backfillTimesheets } = require('../controllers/migrationController');
+const { getRoleBootstrap } = require('../controllers/pageBootstrapController');
 
 router.use(protect);
 
@@ -32,6 +33,7 @@ router.put('/users/:id/role', authorize('user.update'), updateUserRole);
 router.patch('/users/:id/status', authorize('user.update'), toggleUserStatus);
 
 // Role Routes
+router.get('/roles/bootstrap', authorize('role.read'), getRoleBootstrap);
 router.get('/roles', authorize('role.read'), getRoles);
 router.post('/roles', authorize('role.create'), createRole);
 router.put('/roles/:id', authorize('role.update'), updateRole); // Assuming role.update permission exists or re-using role.create

@@ -29,6 +29,18 @@ const companySchema = new mongoose.Schema({
         onboarding: {
             offerLetterTemplateUrl: { type: String, default: '' },
             declarationTemplateUrl: { type: String, default: '' },
+            dynamicTemplates: [{
+                name: { type: String, required: true },
+                url: { type: String, required: true },
+                publicId: { type: String },
+                isRequired: { type: Boolean, default: true }
+            }],
+            policies: [{
+                name: { type: String, required: true },
+                url: { type: String, required: true },
+                publicId: { type: String },
+                isRequired: { type: Boolean, default: false }
+            }]
         },
         attendance: {
             weeklyOff: { type: [String], default: ['Saturday', 'Sunday'] },

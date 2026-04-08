@@ -3,7 +3,7 @@ require('dotenv').config();
 
 mongoose.connect(process.env.MONGO_URI).then(async () => {
     const Role = require('./src/models/Role');
-    
+
     try {
         console.log('Dropping index name_1_company_1...');
         await Role.collection.dropIndex('name_1_company_1');
@@ -11,6 +11,6 @@ mongoose.connect(process.env.MONGO_URI).then(async () => {
     } catch (err) {
         console.error('Error dropping index:', err.message);
     }
-    
+
     process.exit(0);
 });

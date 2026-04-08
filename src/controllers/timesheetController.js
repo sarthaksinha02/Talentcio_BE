@@ -4,6 +4,15 @@ const User = require('../models/User');
 const Attendance = require('../models/Attendance');
 const { startOfMonth, endOfMonth, startOfWeek, endOfWeek, format, startOfDay, endOfDay, addWeeks, subWeeks } = require('date-fns');
 const WorkLog = require('../models/WorkLog');
+const Task = require('../models/Task');
+const Module = require('../models/Module');
+
+const getTimesheetPeriodIdForDate = (dateValue, cycle = 'Monthly') => {
+    const date = new Date(dateValue);
+    if (cycle === 'Weekly') return format(date, "yyyy-'W'II");
+    if (cycle === 'Daily') return format(date, 'yyyy-MM-dd');
+    return format(date, 'yyyy-MM');
+};
 
 // @desc    Get Current Month Timesheet
 // @route   GET /api/timesheet/current
@@ -33,11 +42,9 @@ const getCurrentTimesheet = async (req, res) => {
             });
         }
 
-        // Populate User and Supervisor
-        let fullUser = null;
         try {
             fullUser = await User.findById(req.user._id)
-                .select('firstName lastName email employeeCode')
+                .select('firstName lastName email employeeCode joiningDate')
                 .populate('reportingManagers', 'firstName lastName email')
                 .lean();
         } catch (err) {
@@ -87,9 +94,11 @@ const getCurrentTimesheet = async (req, res) => {
                 date: { $gte: start, $lte: end }
             }).populate({
                 path: 'task',
+                select: 'name module',
                 populate: {
                     path: 'module',
-                    populate: { path: 'project' }
+                    select: 'name project',
+                    populate: { path: 'project', select: 'name client' }
                 }
             }).sort({ date: 1 }).lean(),
             Attendance.find({
@@ -137,7 +146,9 @@ const addEntry = async (req, res) => {
         const isAdmin = req.user.roles?.some(r => 
             (typeof r === 'string' && r === 'Admin') || 
             (typeof r === 'object' && r.name === 'Admin')
-        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.create');
+        ) || req.user.permissions?.includes('*') || 
+          req.user.permissions?.includes('timesheet.create') ||
+          req.user.permissions?.includes('timesheet.update_others');
 
         if (userId && isAdmin) {
             targetUserId = userId;
@@ -150,14 +161,7 @@ const addEntry = async (req, res) => {
 
         // Check for Existing Timesheet Logic
         const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
-        let periodId;
-        if (cycle === 'Weekly') {
-            periodId = format(new Date(entryDate), "yyyy-'W'II"); // ISO Week
-        } else if (cycle === 'Daily') {
-            periodId = format(new Date(entryDate), 'yyyy-MM-dd');
-        } else {
-            periodId = format(new Date(entryDate), 'yyyy-MM');
-        }
+        const periodId = getTimesheetPeriodIdForDate(entryDate, cycle);
 
         const timesheet = await Timesheet.findOne({
             user: targetUserId,
@@ -166,15 +170,7 @@ const addEntry = async (req, res) => {
         });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-            // Admin can bypass this check if needed, but usually submitted timesheets shouldn't be touched unless rejected/reverted.
-            // Let's allow Admin to edit even if submitted? Or maybe restrict adding to DRAFT only.
-            // Requirement was "Admin can edit". Let's imply adding too.
-            // However, typically one edits a submitted timesheet by rejecting it first.
-            // Unless "Edit" implies correcting data without rejection flow.
-            // Let's allow Admin to add even if submitted, but warn or log.
-            if (!isAdmin) {
-                return res.status(400).json({ message: 'Cannot add entries to a submitted or approved timesheet.' });
-            }
+            return res.status(400).json({ message: 'Cannot add entries to a submitted or approved timesheet.' });
         }
 
         // Check Joining Date
@@ -281,7 +277,50 @@ const submitTimesheet = async (req, res) => {
 // @access  Private
 const getProjects = async (req, res) => {
     try {
-        const projects = await Project.find({ companyId: req.companyId, isActive: true }).lean();
+        const { userId } = req.query;
+        let targetUserId = req.user._id;
+
+        // Check Permissions for viewing other's projects
+        const isAdmin = req.user.roles?.some(r => 
+            (typeof r === 'string' && r === 'Admin') || 
+            (typeof r === 'object' && r.name === 'Admin')
+        ) || req.user.permissions?.includes('*') || req.user.permissions?.includes('timesheet.view');
+
+        if (userId && (isAdmin || userId === req.user._id.toString())) {
+            targetUserId = userId;
+        }
+
+        // If Admin AND NO userId query, show all active projects (for Project Management / General view)
+        // BUT if userId query exists, we stick to the restriction logic below.
+        if (isAdmin && !userId) {
+            const projects = await Project.find({ companyId: req.companyId, isActive: true }).lean();
+            return res.json(projects);
+        }
+
+        // For regular users (or when viewing a specific user):
+        // Find projects where the user is:
+        // 1. Manager
+        // 2. Member
+        // 3. Assigned to a task within the project
+
+        // Get Task IDs assigned to the user
+        const assignedTasks = await Task.find({ assignees: targetUserId, companyId: req.companyId }).select('module');
+        const moduleIds = [...new Set(assignedTasks.map(t => t.module))];
+
+        // Get Project IDs for those modules
+        const modules = await Module.find({ _id: { $in: moduleIds } }).select('project');
+        const taskProjectIds = [...new Set(modules.map(m => m.project))];
+
+        const projects = await Project.find({
+            companyId: req.companyId,
+            isActive: true,
+            $or: [
+                { manager: targetUserId },
+                { members: targetUserId },
+                { _id: { $in: taskProjectIds } }
+            ]
+        }).lean();
+
         res.json(projects);
     } catch (error) {
         console.error(error);
@@ -328,6 +367,7 @@ const getUserTimesheet = async (req, res) => {
             (typeof r === 'object' && r.name === 'Admin')
         ) || req.user.permissions?.includes('*') || 
              req.user.permissions?.includes('timesheet.view') ||
+             req.user.permissions?.includes('timesheet.update_others') ||
              req.user.permissions?.includes('attendance.view');
 
         const isManager = targetUser.reportingManagers?.some(m => m.toString() === req.user._id.toString());
@@ -460,11 +500,13 @@ const getPendingTimesheets = async (req, res) => {
                 date: { $gte: start, $lte: end }
             }).populate({
                 path: 'task',
+                select: 'name module',
                 populate: {
                     path: 'module',
-                    populate: { path: 'project' }
+                    select: 'name project',
+                    populate: { path: 'project', select: 'name' }
                 }
-            }).sort({ date: 1 });
+            }).sort({ date: 1 }).lean();
 
             const entries = workLogs.map(log => ({
                 _id: log._id,
@@ -480,7 +522,7 @@ const getPendingTimesheets = async (req, res) => {
             }));
 
             return {
-                ...ts.toObject(),
+                ...(ts.toObject ? ts.toObject() : ts),
                 entries
             };
         }));
@@ -581,19 +623,20 @@ const updateEntry = async (req, res) => {
         const isAdmin = requestor.roles?.some(r => 
             (typeof r === 'string' && r === 'Admin') || 
             (typeof r === 'object' && r.name === 'Admin')
-        ) || requestor.permissions?.includes('*') || requestor.permissions?.includes('timesheet.update');
+        ) || requestor.permissions?.includes('*') || 
+          requestor.permissions?.includes('timesheet.update') ||
+          requestor.permissions?.includes('timesheet.update_others');
 
         if (!isOwner && !isManager && !isAdmin) {
             return res.status(403).json({ message: 'Not authorized' });
         }
 
-        const month = format(workLog.date, 'yyyy-MM');
-        const timesheet = await Timesheet.findOne({ user: owner._id, month, companyId: req.companyId });
+        const cycle = req.company?.settings?.timesheet?.approvalCycle || 'Monthly';
+        const periodId = getTimesheetPeriodIdForDate(workLog.date, cycle);
+        const timesheet = await Timesheet.findOne({ user: owner._id, month: periodId, companyId: req.companyId });
 
         if (timesheet && (timesheet.status === 'SUBMITTED' || timesheet.status === 'APPROVED')) {
-            if (!isManager && !isAdmin) {
-                return res.status(400).json({ message: 'Cannot edit submitted/approved timesheets' });
-            }
+            return res.status(400).json({ message: 'Cannot edit submitted/approved timesheets' });
         }
 
         // Check Joining Date

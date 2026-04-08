@@ -32,7 +32,10 @@ const HiringRequestSchema = new mongoose.Schema({
 
     // 3. Job Requirement Summary
     requirements: {
-        mustHaveSkills: [String],
+        mustHaveSkills: {
+            technical: [String],
+            softSkills: [String]
+        },
         niceToHaveSkills: [String],
         experienceMin: Number,
         experienceMax: Number,

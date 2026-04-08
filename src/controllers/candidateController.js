@@ -3,7 +3,12 @@ const { HiringRequest } = require('../models/HiringRequest');
 const { cloudinary } = require('../config/cloudinary');
 const { extractPublicIdFromUrl } = require('../utils/cloudinaryHelper');
 const mongoose = require('mongoose');
+const Company = require('../models/Company');
+const { sendEmail } = require('../services/emailService');
 const NotificationService = require('../services/notificationService');
+const OnboardingEmployee = require('../models/OnboardingEmployee');
+const CandidateSource = require('../models/CandidateSource');
+const { parseCV } = require('../utils/cvParser');
 
 
 // Upload resume to Cloudinary
@@ -56,6 +61,29 @@ exports.uploadResume = async (req, res) => {
     }
 };
 
+// Parse resume without saving to DB
+exports.parseResume = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No resume file uploaded' });
+        }
+
+        const fileBuffer = req.file.buffer;
+        const fileType = req.file.mimetype;
+
+        const parsedData = await parseCV(fileBuffer, fileType);
+
+        res.status(200).json({
+            message: 'Resume parsed successfully',
+            data: parsedData
+        });
+
+    } catch (error) {
+        console.error('Error parsing resume:', error);
+        res.status(500).json({ message: 'Failed to parse resume', error: error.message });
+    }
+};
+
 // Create new candidate
 exports.createCandidate = async (req, res) => {
     try {
@@ -69,6 +97,8 @@ exports.createCandidate = async (req, res) => {
             source,
             referralName,
             profilePulledBy,
+            calledBy,
+            rate,
             currentCTC,
             expectedCTC,
             inHandOffer,
@@ -85,7 +115,10 @@ exports.createCandidate = async (req, res) => {
             noticePeriod,
             lastWorkingDay,
             status,
-            remark
+            remark,
+            mustHaveSkills,
+            niceToHaveSkills,
+            interviewRounds
         } = req.body;
 
         // Verify hiring request exists
@@ -94,20 +127,113 @@ exports.createCandidate = async (req, res) => {
             return res.status(404).json({ message: 'Hiring request not found' });
         }
 
-        // Check for duplicate email in same hiring request
-        const existingByEmail = await Candidate.findOne({ hiringRequestId, email, companyId: req.companyId });
-        if (existingByEmail) {
-            return res.status(400).json({ message: 'A candidate with this email is already added to this hiring request' });
+        // Check for duplicate email or mobile in same hiring request
+        let candidate = await Candidate.findOne({
+            hiringRequestId,
+            $or: [{ email: email.toLowerCase().trim() }, { mobile: mobile.trim() }],
+            companyId: req.companyId
+        });
+
+        if (candidate) {
+            // Update mode
+            console.log('🔄 Existing candidate found, updating fields...');
+
+            // Track status change for history
+            const statusChanged = status && candidate.status !== status;
+
+            const updatedFields = [];
+            const compareAndUpdate = (field, newValue, label) => {
+                if (newValue !== undefined && newValue !== null && newValue !== '' && candidate[field] !== newValue) {
+                    candidate[field] = newValue;
+                    updatedFields.push(label || field);
+                }
+            };
+
+            compareAndUpdate('candidateName', candidateName, 'Name');
+            compareAndUpdate('source', source, 'Source');
+            compareAndUpdate('profilePulledBy', profilePulledBy, 'Pulled By');
+            compareAndUpdate('calledBy', calledBy, 'Called By');
+            compareAndUpdate('rate', rate, 'Rate');
+            compareAndUpdate('currentCTC', currentCTC, 'Current CTC');
+            compareAndUpdate('expectedCTC', expectedCTC, 'Expected CTC');
+            compareAndUpdate('inHandOffer', inHandOffer, 'Offer in Hand');
+            compareAndUpdate('offerCompany', offerCompany, 'Offer Company');
+            compareAndUpdate('offerCTC', offerCTC, 'Offer CTC');
+            compareAndUpdate('totalExperience', totalExperience, 'Experience');
+            compareAndUpdate('qualification', qualification, 'Qualification');
+            compareAndUpdate('currentCompany', currentCompany, 'Company');
+            compareAndUpdate('currentLocation', currentLocation, 'Location');
+            compareAndUpdate('preferredLocation', preferredLocation, 'Preferred Location');
+            compareAndUpdate('tatToJoin', tatToJoin, 'TAT Join');
+            compareAndUpdate('noticePeriod', noticePeriod, 'Notice Period');
+            compareAndUpdate('lastWorkingDay', lastWorkingDay, 'DOJ/LWD');
+            compareAndUpdate('status', status, 'Status');
+            compareAndUpdate('remark', remark, 'Remark');
+
+            if (mustHaveSkills && Array.isArray(mustHaveSkills)) {
+                const existingSkills = candidate.mustHaveSkills || [];
+                const skillsChanged = existingSkills.length !== mustHaveSkills.length ||
+                    mustHaveSkills.some((s, idx) =>
+                        !existingSkills[idx] ||
+                        existingSkills[idx].skill !== s.skill ||
+                        existingSkills[idx].experience !== s.experience
+                    );
+
+                if (skillsChanged) {
+                    candidate.mustHaveSkills = mustHaveSkills;
+                    updatedFields.push('Skills');
+                }
+            }
+            if (niceToHaveSkills && Array.isArray(niceToHaveSkills)) {
+                candidate.niceToHaveSkills = niceToHaveSkills;
+            }
+            if (interviewRounds && Array.isArray(interviewRounds)) {
+                const existingRounds = candidate.interviewRounds || [];
+                const roundsChanged = existingRounds.length !== interviewRounds.length ||
+                    interviewRounds.some((r, idx) => {
+                        const er = existingRounds[idx];
+                        if (!er) return true;
+                        return er.levelName !== r.levelName ||
+                            er.status !== r.status ||
+                            er.remarks !== r.remarks ||
+                            er.feedback !== r.feedback ||
+                            er.rating !== r.rating ||
+                            er.evaluatedBy?.toString() !== r.evaluatedBy?.toString();
+                    });
+
+                if (roundsChanged) {
+                    candidate.interviewRounds = interviewRounds;
+                    updatedFields.push('Interview History');
+                }
+            }
+
+            if (statusChanged) {
+                candidate.statusHistory.push({
+                    status: status,
+                    changedBy: req.user._id,
+                    changedAt: new Date(),
+                    remark: `Updated via Bulk Import: ${remark || ''}`
+                });
+            }
+
+            await candidate.save();
+
+            const populatedUpdate = await Candidate.findOne({ _id: candidate._id, companyId: req.companyId })
+                .populate('uploadedBy', 'firstName lastName email')
+                .populate('hiringRequestId', 'requestId roleDetails')
+                .populate('interviewRounds.assignedTo', 'firstName lastName email')
+                .populate('interviewRounds.evaluatedBy', 'firstName lastName');
+
+            return res.status(200).json({
+                message: 'Candidate updated successfully',
+                candidate: populatedUpdate,
+                isUpdate: true,
+                updatedFields
+            });
         }
 
-        // Check for duplicate mobile in same hiring request
-        const existingByMobile = await Candidate.findOne({ hiringRequestId, mobile, companyId: req.companyId });
-        if (existingByMobile) {
-            return res.status(400).json({ message: 'A candidate with this mobile number is already added to this hiring request' });
-        }
-
-        // Create candidate
-        const candidate = new Candidate({
+        // Create mode (original logic continue)
+        candidate = new Candidate({
             companyId: req.companyId,
             hiringRequestId,
             resumeUrl,
@@ -119,6 +245,8 @@ exports.createCandidate = async (req, res) => {
             source,
             referralName,
             profilePulledBy,
+            calledBy,
+            rate,
             currentCTC,
             expectedCTC,
             inHandOffer: inHandOffer || false,
@@ -136,6 +264,9 @@ exports.createCandidate = async (req, res) => {
             lastWorkingDay,
             status: status || 'Interested',
             remark,
+            mustHaveSkills: mustHaveSkills || [],
+            niceToHaveSkills: niceToHaveSkills || [],
+            interviewRounds: interviewRounds || [],
             statusHistory: [{
                 status: status || 'Interested',
                 changedBy: req.user._id,
@@ -148,11 +279,14 @@ exports.createCandidate = async (req, res) => {
 
         const populatedCandidate = await Candidate.findOne({ _id: candidate._id, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
-            .populate('hiringRequestId', 'requestId roleDetails');
+            .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('interviewRounds.assignedTo', 'firstName lastName email')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName');
 
         res.status(201).json({
             message: 'Candidate created successfully',
-            candidate: populatedCandidate
+            candidate: populatedCandidate,
+            isUpdate: false
         });
 
     } catch (error) {
@@ -199,6 +333,8 @@ exports.getCandidatesByHiringRequest = async (req, res) => {
         const candidates = await Candidate.find({ ...query, companyId: req.companyId })
             .populate('uploadedBy', 'firstName lastName email')
             .populate('hiringRequestId', 'requestId roleDetails')
+            .populate('interviewRounds.assignedTo', 'firstName lastName email')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName')
             .sort({ uploadedAt: -1 })
             .lean();
 
@@ -251,7 +387,8 @@ exports.getShortlistedCandidates = async (req, res) => {
             .populate('uploadedBy', 'firstName lastName')
             .populate('hiringRequestId', 'requestId roleDetails')
             .populate('interviewRounds.assignedTo', 'firstName lastName') // only pull what is necessary
-            .select('candidateName email mobile status decision uploadedAt interviewRounds profilePulledBy totalExperience currentCTC expectedCTC location expectedLocation pastExperience currentCompany')
+            .populate('interviewRounds.evaluatedBy', 'firstName lastName')
+            .select('candidateName email mobile status decision uploadedAt interviewRounds profilePulledBy calledBy rate totalExperience currentCTC expectedCTC location expectedLocation pastExperience currentCompany')
             .sort({ uploadedAt: -1 })
             .skip(skip)
             .limit(limit)
@@ -381,10 +518,11 @@ exports.updateCandidate = async (req, res) => {
         // Update fields securely (prevent mass assignment)
         const allowedUpdates = [
             'candidateName', 'email', 'mobile', 'source', 'referralName',
-            'profilePulledBy', 'currentCTC', 'expectedCTC', 'inHandOffer', 'offerCompany', 'offerCTC',
+            'profilePulledBy', 'calledBy', 'rate', 'currentCTC', 'expectedCTC', 'inHandOffer', 'offerCompany', 'offerCTC',
             'preference', 'totalExperience', 'qualification', 'currentCompany', 'pastExperience',
             'currentLocation', 'preferredLocation', 'tatToJoin', 'noticePeriod',
-            'status', 'remark', 'decision', 'phase2Decision', 'phase3Decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId'
+            'status', 'remark', 'decision', 'phase2Decision', 'phase3Decision', 'lastWorkingDay', 'resumeUrl', 'resumePublicId',
+            'mustHaveSkills', 'niceToHaveSkills'
         ];
 
         allowedUpdates.forEach(field => {
@@ -636,17 +774,92 @@ exports.updatePhase3Decision = async (req, res) => {
     }
 };
 
-// Get distinct candidate sources
+// Get distinct candidate sources + stored custom sources
 exports.getCandidateSources = async (req, res) => {
     try {
-        const sources = await Candidate.distinct('source', { companyId: req.companyId });
-        // Ensure default sources are included if not present in DB
-        const defaultSources = ['Job Portal', 'Referral'];
-        const allSources = [...new Set([...defaultSources, ...sources])];
+        // 1. Get sources from actual candidates
+        const existingSources = await Candidate.distinct('source', { companyId: req.companyId });
 
-        res.status(200).json(allSources.sort());
+        // 2. Get sources from CandidateSource master data
+        const masterSources = await CandidateSource.find({ companyId: req.companyId });
+
+        const defaultSources = ['Job Portal', 'Referral', 'LinkedIn', 'Consultancy', 'Internal Database', 'Other'];
+
+        // Format master sources to include ID for deletion
+        const customSources = masterSources.map(s => ({
+            _id: s._id,
+            name: s.name,
+            isCustom: true
+        }));
+
+        // Combine all and return as objects to differentiate custom ones
+        const combined = [...defaultSources.map(s => ({ name: s, isCustom: false }))];
+
+        // Add existing from candidates if not in default
+        existingSources.forEach(s => {
+            if (!combined.some(c => c.name === s)) {
+                combined.push({ name: s, isCustom: false });
+            }
+        });
+
+        // Add custom from master data
+        customSources.forEach(s => {
+            if (!combined.some(c => c.name === s.name)) {
+                combined.push(s);
+            } else {
+                // If already there but we have a custom record, mark it as custom
+                const index = combined.findIndex(c => c.name === s.name);
+                combined[index] = s;
+            }
+        });
+
+        res.status(200).json(combined.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (error) {
         console.error('Error fetching sources:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Add a new custom candidate source
+exports.addCandidateSource = async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) {
+            return res.status(400).json({ message: 'Source name is required' });
+        }
+
+        const existing = await CandidateSource.findOne({ name, companyId: req.companyId });
+        if (existing) {
+            return res.status(400).json({ message: 'Source already exists' });
+        }
+
+        const newSource = new CandidateSource({
+            name,
+            companyId: req.companyId,
+            createdBy: req.user._id
+        });
+
+        await newSource.save();
+        res.status(201).json({ message: 'Source added successfully', source: newSource });
+    } catch (error) {
+        console.error('Error adding source:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+};
+
+// Delete a custom candidate source
+exports.deleteCandidateSource = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const source = await CandidateSource.findOneAndDelete({ _id: id, companyId: req.companyId });
+
+        if (!source) {
+            return res.status(404).json({ message: 'Source not found' });
+        }
+
+        res.status(200).json({ message: 'Source deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting source:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
@@ -1073,5 +1286,127 @@ exports.deleteSkillRating = async (req, res) => {
     } catch (error) {
         console.error('Error deleting skill rating:', error);
         res.status(500).json({ message: 'Server error deleting skill rating', error: error.message });
+    }
+};
+
+// Transfer candidate to Onboarding module
+exports.transferToOnboarding = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const candidate = await Candidate.findOne({ _id: id, companyId: req.companyId })
+            .populate('hiringRequestId');
+
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidate not found' });
+        }
+
+        // Validation: Ensure a Phase 3 decision is set
+        if (!candidate.phase3Decision || candidate.phase3Decision === 'None') {
+            return res.status(400).json({ message: 'A Phase 3 decision must be set before transferring to onboarding' });
+        }
+
+        if (candidate.isTransferredToOnboarding) {
+            return res.status(400).json({ message: 'Candidate is already transferred to onboarding' });
+        }
+
+        // Check if employee with same email already exists in onboarding
+        const existingOnboarding = await OnboardingEmployee.findOne({ email: candidate.email, companyId: req.companyId });
+        if (existingOnboarding) {
+            candidate.isTransferredToOnboarding = true; // Mark as transferred since they exist
+            await candidate.save();
+            return res.status(400).json({ message: 'An onboarding record with this email already exists' });
+        }
+
+
+        // Split name into first and last
+        const nameParts = candidate.candidateName.trim().split(/\s+/);
+        const firstName = nameParts[0];
+        const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
+        // Generate credentials
+        const tempEmployeeId = await OnboardingEmployee.generateTempId(req.companyId);
+        const tempPassword = Math.random().toString(36).slice(-8); // Random 8 char password
+
+        // Default document slots
+        const defaultDocuments = [
+            { type: 'resume', label: 'Updated Resume' },
+            { type: 'aadhaar_front', label: 'Aadhaar Card (Front)' },
+            { type: 'aadhaar_back', label: 'Aadhaar Card (Back)' },
+            { type: 'pan', label: 'PAN Card' },
+            { type: 'salary_slip', label: 'Salary Slip' },
+            { type: 'passport', label: 'Passport (Optional)' },
+            { type: '10th_marksheet', label: '10th Marksheet / Certificate' },
+            { type: '12th_marksheet', label: '12th Marksheet / Certificate' },
+            { type: 'graduation', label: 'Graduation Marksheet / Certificate' },
+            { type: 'relieving_letter', label: 'Previous Employer Relieving Letter' },
+            { type: 'experience_certificate', label: 'Experience Certificate' },
+            { type: 'passport_photo', label: 'Recent Passport-Size Photograph' }
+        ];
+
+        console.log('📄 Initializing onboarding documents:', defaultDocuments.length);
+
+        // Create onboarding employee
+        const onboardingEmployee = new OnboardingEmployee({
+            companyId: req.companyId,
+            createdBy: req.user._id,
+            sourcedFromTA: true,
+            tempEmployeeId,
+            tempPassword, // hashed in pre-save
+            firstName,
+            lastName,
+            email: candidate.email,
+            phone: candidate.mobile,
+            designation: candidate.hiringRequestId?.roleDetails?.positionName || '',
+            joiningDate: candidate.lastWorkingDay || null,
+            workLocation: candidate.preferredLocation || candidate.currentLocation || '',
+            salary: {
+                annualCTC: candidate.currentCTC?.toString() || ''
+            },
+            personalDetails: {
+                fullName: candidate.candidateName,
+                personalEmail: candidate.email,
+                personalMobile: candidate.mobile,
+                currentAddress: {
+                    line1: candidate.currentLocation || '',
+                    city: candidate.currentLocation || ''
+                }
+            },
+            status: 'Pending',
+            documents: defaultDocuments,
+            requestedSections: [],
+            requestedDocuments: []
+        });
+
+        console.log('💾 Saving onboarding employee with documents:', onboardingEmployee.documents.length);
+        await onboardingEmployee.save();
+        console.log('✅ Onboarding employee saved successfully:', onboardingEmployee._id);
+
+        // Mark candidate as transferred
+        candidate.isTransferredToOnboarding = true;
+        await candidate.save();
+
+        // Add audit log to onboarding employee
+        try {
+            await OnboardingEmployee.findByIdAndUpdate(onboardingEmployee._id, {
+                $push: {
+                    auditLog: {
+                        action: 'TRANSFERRED_FROM_TA',
+                        details: 'Candidate successfully transferred from Talent Acquisition'
+                    }
+                }
+            });
+        } catch (logError) {
+            console.error('Failed to log transfer audit:', logError);
+        }
+
+        res.status(200).json({
+            message: 'Candidate successfully transferred to onboarding',
+            onboardingEmployeeId: onboardingEmployee._id
+        });
+
+    } catch (error) {
+        console.error('Error transferring to onboarding:', error);
+        res.status(500).json({ message: 'Server error during transfer', error: error.message });
     }
 };

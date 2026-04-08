@@ -23,6 +23,11 @@ const discussionSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    supervisor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    },
     companyId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Company',
@@ -30,5 +35,7 @@ const discussionSchema = new mongoose.Schema({
         index: true
     }
 }, { timestamps: true });
+
+discussionSchema.index({ supervisor: 1, companyId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Discussion', discussionSchema);

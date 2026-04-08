@@ -7,6 +7,7 @@ const User = require('../models/User');
 // @access  Private
 const getRoles = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=60, stale-while-revalidate=60');
         const roles = await Role.find({ companyId: req.companyId }).populate('permissions');
         res.json(roles);
     } catch (error) {
@@ -73,6 +74,7 @@ const updateRole = async (req, res) => {
 // @access  Private
 const getPermissions = async (req, res) => {
     try {
+        res.set('Cache-Control', 'private, max-age=120, stale-while-revalidate=120');
         let permissions = await Permission.find({});
         // Explicit filter
         permissions = permissions.filter(p => p.key !== '*');

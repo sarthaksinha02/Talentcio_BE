@@ -25,7 +25,7 @@ const getTransporter = () => {
 /**
  * Generic function to send an email (Supports Brevo API and SMTP)
  */
-const sendEmail = async ({ to, subject, html, text }) => {
+const sendEmail = async ({ to, subject, html, text, attachments = [] }) => {
     const apiKey = process.env.BREVO_API_KEY || process.env.EMAIL_PASS;
     const fromEmail = process.env.EMAIL_FROM || 'no-reply@talentcio.com';
 
@@ -33,13 +33,27 @@ const sendEmail = async ({ to, subject, html, text }) => {
     if (apiKey && apiKey.startsWith('xkeysib-')) {
         try {
             console.log(`[EMAIL] Attempting to send via Brevo API: ${to}`);
-            const response = await axios.post('https://api.brevo.com/v3/smtp/email', {
+            
+            // Format attachments for Brevo API if they exist
+            const brevoAttachments = attachments.map(att => ({
+                name: att.filename || att.name,
+                content: att.content ? att.content.toString('base64') : undefined,
+                url: att.path && att.path.startsWith('http') ? att.path : undefined
+            })).filter(att => att.content || att.url);
+
+            const payload = {
                 sender: { name: 'TalentCio', email: fromEmail },
                 to: [{ email: to }],
                 subject: subject,
                 htmlContent: html,
                 textContent: text
-            }, {
+            };
+
+            if (brevoAttachments.length > 0) {
+                payload.attachment = brevoAttachments;
+            }
+
+            const response = await axios.post('https://api.brevo.com/v3/smtp/email', payload, {
                 headers: {
                     'api-key': apiKey,
                     'Content-Type': 'application/json'
@@ -61,13 +75,19 @@ const sendEmail = async ({ to, subject, html, text }) => {
 
     try {
         const transporter = getTransporter();
-        const info = await transporter.sendMail({
+        const mailOptions = {
             from: `"TalentCio" <${fromEmail}>`,
             to,
             subject,
             html,
             text
-        });
+        };
+
+        if (attachments && attachments.length > 0) {
+            mailOptions.attachments = attachments;
+        }
+
+        const info = await transporter.sendMail(mailOptions);
         console.log(`[EMAIL] SMTP Success: ${info.messageId}`);
         return true;
     } catch (error) {

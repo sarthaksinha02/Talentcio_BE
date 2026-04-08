@@ -6,8 +6,10 @@ const Notification = require('../models/Notification');
 exports.getMyNotifications = async (req, res) => {
     try {
         const notifications = await Notification.find({ user: req.user._id, companyId: req.companyId })
+            .select('title message type isRead link metadata createdAt')
             .sort({ createdAt: -1 })
-            .limit(50); // Keep it to a reasonable maximum for performance
+            .limit(50)
+            .lean(); // Keep it to a reasonable maximum for performance
             
         res.status(200).json(notifications);
     } catch (error) {

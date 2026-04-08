@@ -15,20 +15,24 @@ const {
     updateAttendance,
     createAttendance,
     getTeamAttendanceReport,
+    exportTeamAttendanceExcel,
     requestRegularization,
     getRegularizationRequests,
     processRegularizationRequest
 } = require('../controllers/attendanceController');
+const { getAttendanceBootstrap } = require('../controllers/pageBootstrapController');
 
 router.use(protect); // All routes protected
 router.use(requireModule('attendance'));
 
+router.get('/bootstrap', getAttendanceBootstrap);
 router.get('/today', getTodayStatus);
 router.post('/clock-in', authorize('attendance.clock_in'), clockIn);
 router.post('/clock-out', authorize('attendance.clock_in'), clockOut);
 router.get('/me', getMyAttendance);
 router.get('/history', getAttendanceByMonth);
 router.get('/team-report', getTeamAttendanceReport);
+router.get('/export-excel', authorize('attendance.export|attendance.view_others'), exportTeamAttendanceExcel);
 router.get('/approvals', getPendingRequests);
 
 // Regularization

@@ -3,25 +3,54 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const mongoose = require('mongoose');
 const connectDB = require('./db');
 
 const app = express();
 const server = http.createServer(app);
 
+// --- CORS CONFIGURATION (MUST BE AT THE TOP) ---
+const allowedOrigins = [
+    'https://telentcio.vercel.app',
+    'https://talentcio.vercel.app',
+    'http://localhost:3000',
+    'https://telentcio-demo.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:5000'
+];
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow if no origin (like mobile or same-origin)
+        if (!origin) return callback(null, true);
+
+        const normalizedOrigin = origin.replace(/\/$/, "");
+        const isAllowed = allowedOrigins.some(allowed =>
+            normalizedOrigin === allowed.replace(/\/$/, "") ||
+            normalizedOrigin.includes('localhost') ||
+            normalizedOrigin.includes('127.0.0.1')
+        );
+
+        if (isAllowed) {
+            callback(null, true);
+        } else {
+            callback(null, false);
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept'],
+    optionsSuccessStatus: 204
+};
+
+// Apply CORS globally before ANY other middleware
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions)); // Explicitly handle all preflight requests
+// ----------------------------------------------
+
 // Setup Socket.IO
 const io = new Server(server, {
-    cors: {
-        origin: function (origin, callback) {
-            // Allow all localhost origins including subdomains
-            if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
-                callback(null, true);
-            } else {
-                callback(null, "*"); // Fallback for other environments if needed
-            }
-        },
-        methods: ["GET", "POST"],
-        credentials: true
-    }
+    cors: corsOptions
 });
 
 // Expose io to routes
@@ -53,7 +82,6 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
 app.use(express.json());
 
 // Models (Register Schemas)

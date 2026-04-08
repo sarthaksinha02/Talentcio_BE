@@ -16,10 +16,12 @@ const {
     approveTimesheet,
     updateEntry
 } = require('../controllers/timesheetController');
+const { getTimesheetBootstrap } = require('../controllers/pageBootstrapController');
 
 router.use(protect); 
 router.use(requireModule(['timesheet', 'attendance']));
 
+router.get('/bootstrap', getTimesheetBootstrap);
 router.get('/current', getCurrentTimesheet);
 router.get('/user/:userId', getUserTimesheet);
 router.post('/entry', addEntry);

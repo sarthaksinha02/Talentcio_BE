@@ -59,6 +59,14 @@ const candidateSchema = new mongoose.Schema({
         type: String,
         trim: true
     },
+    calledBy: {
+        type: String,
+        trim: true
+    },
+    rate: {
+        type: Number,
+        min: 0
+    },
     referralName: {
         type: String,
         trim: true
@@ -118,6 +126,14 @@ const candidateSchema = new mongoose.Schema({
             type: String,
             trim: true
         }
+    }],
+    mustHaveSkills: [{
+        skill: { type: String },
+        experience: { type: Number, min: 0 }
+    }],
+    niceToHaveSkills: [{
+        skill: { type: String },
+        experience: { type: Number, min: 0 }
     }],
 
     // Location Details
@@ -238,6 +254,7 @@ const candidateSchema = new mongoose.Schema({
     // Tracking Reopened Candidates
     isTransferred: { type: Boolean, default: false },
     transferredFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'HiringRequest' },
+    isTransferredToOnboarding: { type: Boolean, default: false },
 
     // Skill Ratings
     skillRatings: [{
@@ -254,7 +271,11 @@ candidateSchema.index({ hiringRequestId: 1, email: 1 }, { unique: true });
 
 // Performance Indexes
 candidateSchema.index({ hiringRequestId: 1, status: 1 });
+candidateSchema.index({ hiringRequestId: 1, decision: 1 });
+candidateSchema.index({ hiringRequestId: 1, phase2Decision: 1 });
+candidateSchema.index({ hiringRequestId: 1, phase3Decision: 1 });
 candidateSchema.index({ companyId: 1, createdAt: -1 });
+candidateSchema.index({ companyId: 1, 'interviewRounds.assignedTo': 1 });
 
 
 

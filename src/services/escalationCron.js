@@ -1,7 +1,9 @@
 const cron = require('node-cron');
 const HelpdeskQuery = require('../models/HelpdeskQuery');
 const User = require('../models/User');
+const Company = require('../models/Company');
 const NotificationService = require('./notificationService');
+const { calculateWorkHours } = require('./helpdeskUtils');
 
 const startEscalationCron = (io) => {
     // Run every hour
@@ -17,18 +19,19 @@ const startEscalationCron = (io) => {
             const systemAdmin = await User.findOne({ 'roles.name': 'Admin' }).lean();
 
             for (const query of pendingQueries) {
-                const createdAt = new Date(query.createdAt);
-                const diffTime = Math.abs(now - createdAt);
-                const diffHours = diffTime / (1000 * 60 * 60);
-
-                // Determine the threshold for this query
+                // Determine the threshold and company settings
                 const qType = query.queryType;
                 const escalationDays = (qType && qType.enableEscalation && qType.escalationDays) ? qType.escalationDays : 2;
                 const thresholdHours = escalationDays * 24;
 
-                if (diffHours >= thresholdHours) {
+                const company = await Company.findById(query.companyId).lean();
+                const weeklyOff = company?.settings?.attendance?.weeklyOff || ['Saturday', 'Sunday'];
+                
+                const workHoursElapsed = calculateWorkHours(query.createdAt, now, weeklyOff);
+
+                if (workHoursElapsed >= thresholdHours) {
                     const oldAssignee = query.assignedTo;
-                    console.log(`[CRON] Escalating Query ${query.queryId} (${diffHours.toFixed(2)} hours old, Threshold: ${thresholdHours}h)`);
+                    console.log(`[CRON] Escalating Query ${query.queryId} (${workHoursElapsed.toFixed(2)} hours old, Threshold: ${thresholdHours}h)`);
 
                     query.status = 'Escalated';
                     query.escalatedAt = now;
@@ -39,6 +42,9 @@ const startEscalationCron = (io) => {
                     let newAssignee = null;
                     if (qType && qType.enableEscalation && qType.escalationPerson) {
                         newAssignee = qType.escalationPerson;
+                        if (!query.originalAssignee) {
+                            query.originalAssignee = query.assignedTo;
+                        }
                         query.assignedTo = newAssignee;
                         commentText += ` It has been re-assigned to the designated escalation contact.`;
                     } else {
@@ -58,6 +64,7 @@ const startEscalationCron = (io) => {
                         // Notify the raiser
                         await NotificationService.createNotification(io, {
                             user: query.raisedBy,
+                            companyId: query.companyId,
                             title: 'Query Escalated',
                             message: `Your query "${query.subject}" has been escalated due to SLA timeout.`,
                             type: 'Alert',
@@ -68,6 +75,7 @@ const startEscalationCron = (io) => {
                         if (newAssignee && newAssignee.toString() !== oldAssignee.toString()) {
                             await NotificationService.createNotification(io, {
                                 user: newAssignee,
+                                companyId: query.companyId,
                                 title: 'Escalated Query Assigned',
                                 message: `An escalated query "${query.subject}" has been assigned to you.`,
                                 type: 'Alert',
