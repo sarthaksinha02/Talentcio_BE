@@ -21,7 +21,7 @@ const allowedOrigins = [
 const corsOptions = {
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
-        const isAllowed = allowedOrigins.some(allowed => 
+        const isAllowed = allowedOrigins.some(allowed =>
             origin === allowed || origin.includes('localhost') || origin.includes('127.0.0.1')
         );
         if (isAllowed) {
