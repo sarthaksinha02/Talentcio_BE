@@ -8,20 +8,39 @@ const connectDB = require('./db');
 const app = express();
 const server = http.createServer(app);
 
-// Setup Socket.IO
+const allowedOrigins = [
+    'https://telentcio.vercel.app',
+    'https://talentcio.vercel.app', // Adding common variation
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5000'
+];
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps, curl, or server-to-server)
+        if (!origin) return callback(null, true);
+        
+        const isAllowed = allowedOrigins.some(allowed => 
+            origin === allowed || origin.includes('localhost') || origin.includes('127.0.0.1')
+        );
+
+        if (isAllowed) {
+            callback(null, true);
+        } else {
+            // Log for debugging
+            console.log('Blocked by CORS:', origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id']
+};
+
+// Setup Socket.IO with consolidated CORS
 const io = new Server(server, {
-    cors: {
-        origin: function (origin, callback) {
-            // Allow all localhost origins including subdomains
-            if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
-                callback(null, true);
-            } else {
-                callback(null, "*"); // Fallback for other environments if needed
-            }
-        },
-        methods: ["GET", "POST"],
-        credentials: true
-    }
+    cors: corsOptions
 });
 
 // Expose io to routes
@@ -53,7 +72,7 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Models (Register Schemas)
