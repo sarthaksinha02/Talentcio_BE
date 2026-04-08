@@ -15,6 +15,7 @@ const allowedOrigins = [
     'https://telentcio.vercel.app',
     'https://talentcio.vercel.app',
     'http://localhost:3000',
+    'https://telentcio-demo.vercel.app',
     'http://localhost:5173',
     'http://localhost:5000'
 ];
@@ -23,11 +24,11 @@ const corsOptions = {
     origin: function (origin, callback) {
         // Allow if no origin (like mobile or same-origin)
         if (!origin) return callback(null, true);
-        
+
         const normalizedOrigin = origin.replace(/\/$/, "");
-        const isAllowed = allowedOrigins.some(allowed => 
-            normalizedOrigin === allowed.replace(/\/$/, "") || 
-            normalizedOrigin.includes('localhost') || 
+        const isAllowed = allowedOrigins.some(allowed =>
+            normalizedOrigin === allowed.replace(/\/$/, "") ||
+            normalizedOrigin.includes('localhost') ||
             normalizedOrigin.includes('127.0.0.1')
         );
 
