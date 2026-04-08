@@ -10,20 +10,35 @@ const requestTiming = require('./src/middlewares/requestTiming');
 const app = express();
 const server = http.createServer(app);
 
+const allowedOrigins = [
+    'https://telentcio.vercel.app',
+    'https://talentcio.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:5000'
+];
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        if (!origin) return callback(null, true);
+        const isAllowed = allowedOrigins.some(allowed => 
+            origin === allowed || origin.includes('localhost') || origin.includes('127.0.0.1')
+        );
+        if (isAllowed) {
+            callback(null, true);
+        } else {
+            console.log('Blocked by CORS:', origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id']
+};
+
 // Setup Socket.IO
 const io = new Server(server, {
-    cors: {
-        origin: function (origin, callback) {
-            // Allow all localhost origins including subdomains
-            if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
-                callback(null, true);
-            } else {
-                callback(null, "*"); // Fallback for other environments if needed
-            }
-        },
-        methods: ["GET", "POST"],
-        credentials: true
-    }
+    cors: corsOptions
 });
 
 // Expose io to routes
@@ -71,7 +86,7 @@ mongoose.Query.prototype.exec = async function (...args) {
 };
 
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(requestTiming);
 
