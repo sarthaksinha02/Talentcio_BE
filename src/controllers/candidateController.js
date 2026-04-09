@@ -150,6 +150,7 @@ exports.createCandidate = async (req, res) => {
             };
 
             compareAndUpdate('candidateName', candidateName, 'Name');
+            compareAndUpdate('mobile', mobile, 'Mobile');
             compareAndUpdate('source', source, 'Source');
             compareAndUpdate('profilePulledBy', profilePulledBy, 'Pulled By');
             compareAndUpdate('calledBy', calledBy, 'Called By');
@@ -168,6 +169,7 @@ exports.createCandidate = async (req, res) => {
             compareAndUpdate('noticePeriod', noticePeriod, 'Notice Period');
             compareAndUpdate('lastWorkingDay', lastWorkingDay, 'DOJ/LWD');
             compareAndUpdate('status', status, 'Status');
+            compareAndUpdate('decision', req.body.decision, 'Decision');
             compareAndUpdate('remark', remark, 'Remark');
 
             if (mustHaveSkills && Array.isArray(mustHaveSkills)) {
@@ -262,6 +264,7 @@ exports.createCandidate = async (req, res) => {
             tatToJoin,
             noticePeriod,
             lastWorkingDay,
+            decision: req.body.decision || 'None',
             status: status || 'Interested',
             remark,
             mustHaveSkills: mustHaveSkills || [],
