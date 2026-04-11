@@ -16,6 +16,7 @@ const allowedOrigins = [
     'http://localhost:3000',
     'https://telentcio-demo.vercel.app',
     'http://localhost:5173',
+    'http://localhost:5174',
     'http://localhost:5000'
 ];
 
@@ -39,7 +40,7 @@ const corsOptions = {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
     optionsSuccessStatus: 204
 };
 

@@ -198,10 +198,11 @@ const applyLeave = async (req, res) => {
             const io = req.app.get('io');
             const notifications = currentUser.reportingManagers.map(manager => ({
                 user: manager._id,
+                companyId: req.companyId,
                 title: 'New Leave Request',
                 message: `${currentUser.firstName} ${currentUser.lastName} has applied for ${daysCount} days of ${leaveType} leave.`,
                 type: 'Approval',
-                link: '/admin/leaves/requests'
+                link: '/leaves'
             }));
             await NotificationService.createManyNotifications(io, notifications);
         }
@@ -352,7 +353,7 @@ const getManagerApprovals = async (req, res) => {
         const [requests, configs] = await Promise.all([
             LeaveRequest.find(query)
                 .populate('user', 'firstName lastName email employeeCode')
-                .sort({ createdAt: 1 })
+                .sort({ createdAt: -1 })
                 .select('user leaveType startDate endDate daysCount reason status isHalfDay halfDaySession createdAt documents rejectionReason')
                 .lean(),
             LeaveConfig.find({ companyId: req.companyId }).select('leaveType sandwichRule').lean()
@@ -440,6 +441,7 @@ const updateLeaveStatus = async (req, res) => {
         const io = req.app.get('io');
         await NotificationService.createNotification(io, {
             user: request.user,
+            companyId: req.companyId,
             title: `Leave Request ${status}`,
             message: `Your leave request for ${request.daysCount} days of ${request.leaveType} has been ${status.toLowerCase()}.`,
             type: status === 'Approved' ? 'Info' : 'Alert',

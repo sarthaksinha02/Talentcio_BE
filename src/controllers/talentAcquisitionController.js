@@ -76,10 +76,11 @@ exports.createHiringRequest = async (req, res) => {
                     const io = req.app.get('io');
                     const notifications = currentStep.approvers.map(approverId => ({
                         user: approverId,
+                        companyId: req.companyId,
                         title: 'New Hiring Request Approval',
                         message: `Hiring Request ${requestId} for ${roleDetails.title} has been submitted and requires your approval.`,
                         type: 'Approval',
-                        link: `/ta/hiring-request/${newRequest._id}/details`
+                        link: `/ta/view/${newRequest._id}`
                     }));
                     await NotificationService.createManyNotifications(io, notifications);
                 }
@@ -399,10 +400,11 @@ exports.approveHiringRequest = async (req, res) => {
                     const io = req.app.get('io');
                     const notifications = nextStep.approvers.map(approverId => ({
                         user: approverId,
+                        companyId: req.companyId,
                         title: 'Hiring Request Approval Pending',
                         message: `Hiring Request ${request.requestId} for ${request.roleDetails.title} has reached your approval level.`,
                         type: 'Approval',
-                        link: `/ta/hiring-request/${request._id}/details`
+                        link: `/ta/view/${request._id}`
                     }));
                     await NotificationService.createManyNotifications(io, notifications);
                 }
@@ -415,10 +417,11 @@ exports.approveHiringRequest = async (req, res) => {
                     const io = req.app.get('io');
                     await NotificationService.createNotification(io, {
                         user: request.createdBy,
+                        companyId: req.companyId,
                         title: 'Hiring Request Approved',
                         message: `Your Hiring Request ${request.requestId} for ${request.roleDetails.title} has been fully approved.`,
                         type: 'Info',
-                        link: `/ta/hiring-request/${request._id}/details`
+                        link: `/ta/view/${request._id}`
                     });
                 }
             }
@@ -443,10 +446,11 @@ exports.approveHiringRequest = async (req, res) => {
                     const io = req.app.get('io');
                     await NotificationService.createNotification(io, {
                         user: request.createdBy,
+                        companyId: req.companyId,
                         title: 'Hiring Request Approved',
                         message: `Your Hiring Request ${request.requestId} has been fully approved.`,
                         type: 'Info',
-                        link: `/ta/hiring-request/${request._id}/details`
+                        link: `/ta/view/${request._id}`
                     });
                 }
             } else {

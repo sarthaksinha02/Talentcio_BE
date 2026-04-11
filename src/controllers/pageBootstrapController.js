@@ -458,10 +458,18 @@ exports.getTimesheetBootstrap = async (req, res) => {
 
 exports.getNotificationBootstrap = async (req, res) => {
     try {
-        setPrivateCache(res, 15);
+        // Notifications are real-time data — never serve from cache.
+        res.set('Cache-Control', 'no-store');
         const includeInterviews = req.query.includeInterviews === 'true';
 
-        const notificationsPromise = Notification.find({ user: req.user._id, companyId: req.companyId })
+        const notificationsPromise = Notification.find({
+            user: req.user._id,
+            $or: [
+                { companyId: req.companyId },
+                { companyId: { $exists: false } },
+                { companyId: null }
+            ]
+        })
             .select('title message type isRead link metadata createdAt')
             .sort({ createdAt: -1 })
             .limit(50)
@@ -570,7 +578,8 @@ exports.getDiscussionsBootstrap = async (req, res) => {
 
 exports.getHelpdeskBootstrap = async (req, res) => {
     try {
-        setPrivateCache(res, 20);
+        // Caching disabled for real-time visibility consistency
+        // setPrivateCache(res, 20);
         const isAdmin = req.user.roles.some(r => ['Admin', 'System'].includes(r.name || r) || r.isSystem === true);
         const isResolverRole = req.user.roles.some(r => ['HR', 'Supervisor', 'Admin', 'System'].includes(r.name || r));
 

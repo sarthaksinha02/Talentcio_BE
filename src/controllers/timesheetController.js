@@ -6,6 +6,7 @@ const { startOfMonth, endOfMonth, startOfWeek, endOfWeek, format, startOfDay, en
 const WorkLog = require('../models/WorkLog');
 const Task = require('../models/Task');
 const Module = require('../models/Module');
+const NotificationService = require('../services/notificationService');
 
 const getTimesheetPeriodIdForDate = (dateValue, cycle = 'Monthly') => {
     const date = new Date(dateValue);
@@ -263,7 +264,23 @@ const submitTimesheet = async (req, res) => {
 
         timesheet.status = 'SUBMITTED';
         timesheet.submissionCycle = cycle;
+        timesheet.submittedAt = new Date();
         await timesheet.save();
+
+        // Notify Managers
+        const currentUser = await User.findById(req.user._id).populate('reportingManagers');
+        if (currentUser && currentUser.reportingManagers && currentUser.reportingManagers.length > 0) {
+            const io = req.app.get('io');
+            const notifications = currentUser.reportingManagers.map(manager => ({
+                user: manager._id,
+                companyId: req.companyId,
+                title: 'Timesheet Submitted',
+                message: `${currentUser.firstName} ${currentUser.lastName} has submitted their timesheet for ${timesheet.month}.`,
+                type: 'Approval',
+                link: '/timesheet'
+            }));
+            await NotificationService.createManyNotifications(io, notifications);
+        }
 
         res.json(timesheet);
     } catch (error) {
@@ -595,6 +612,18 @@ const approveTimesheet = async (req, res) => {
         }
 
         await timesheet.save();
+
+        // Notify Employee
+        const io = req.app.get('io');
+        await NotificationService.createNotification(io, {
+            user: targetUser._id,
+            companyId: req.companyId,
+            title: `Timesheet ${status}`,
+            message: `Your timesheet for ${timesheet.month} has been ${status === 'APPROVED' ? 'approved' : 'rejected'}. ${reason ? 'Reason: ' + reason : ''}`,
+            type: status === 'APPROVED' ? 'Info' : 'Alert',
+            link: '/timesheet'
+        });
+
         res.json(timesheet);
 
     } catch (error) {
