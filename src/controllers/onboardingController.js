@@ -151,7 +151,7 @@ exports.addEmployee = async (req, res) => {
     } catch (error) {
         console.error('Error adding onboarding employee:', error);
         if (error.code === 11000) {
-            return res.status(400).json({ message: 'Duplicate entry. This employee may already exist.' });
+            return res.status(400).json({ error: error.message, "updated" });
         }
         res.status(500).json({ message: 'Server error', error: error.message });
     }
