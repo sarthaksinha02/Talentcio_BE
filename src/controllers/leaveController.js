@@ -198,10 +198,11 @@ const applyLeave = async (req, res) => {
             const io = req.app.get('io');
             const notifications = currentUser.reportingManagers.map(manager => ({
                 user: manager._id,
+                companyId: req.companyId,
                 title: 'New Leave Request',
                 message: `${currentUser.firstName} ${currentUser.lastName} has applied for ${daysCount} days of ${leaveType} leave.`,
                 type: 'Approval',
-                link: '/admin/leaves/requests'
+                link: '/leaves'
             }));
             await NotificationService.createManyNotifications(io, notifications);
         }
@@ -326,7 +327,7 @@ const getManagerApprovals = async (req, res) => {
             (typeof r === 'string' ? r : r.name) === 'Admin'
         );
 
-        const { status } = req.query;
+        const { status, userIds } = req.query;
         let query = { companyId: req.companyId };
         
         if (status && status !== 'All') {
@@ -340,19 +341,33 @@ const getManagerApprovals = async (req, res) => {
         if (!isAdmin) {
             // Managers only see their direct reports' requests
             const subordinates = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
-            const subordinateIds = subordinates.map(u => u._id);
+            const subordinateIds = subordinates.map(u => u._id.toString());
 
             if (subordinateIds.length === 0) {
                 return res.json([]);
             }
-            query.user = { $in: subordinateIds };
+
+            if (userIds) {
+                const requestedUserIds = userIds.split(',').filter(Boolean);
+                // Intersect requested with allowed subordinates
+                const allowedIds = requestedUserIds.filter(id => subordinateIds.includes(id));
+                query.user = { $in: allowedIds };
+            } else {
+                query.user = { $in: subordinateIds };
+            }
+        } else if (userIds) {
+            // Admin: no restriction, just filter if userIds provided
+            const requestedUserIds = userIds.split(',').filter(Boolean);
+            if (requestedUserIds.length > 0) {
+                query.user = { $in: requestedUserIds };
+            }
         }
-        // Admins: no user filter — see all pending requests across the org
+        // Admins: if no userIds provided, see all pending requests across the org
 
         const [requests, configs] = await Promise.all([
             LeaveRequest.find(query)
                 .populate('user', 'firstName lastName email employeeCode')
-                .sort({ createdAt: 1 })
+                .sort({ createdAt: -1 })
                 .select('user leaveType startDate endDate daysCount reason status isHalfDay halfDaySession createdAt documents rejectionReason')
                 .lean(),
             LeaveConfig.find({ companyId: req.companyId }).select('leaveType sandwichRule').lean()
@@ -440,6 +455,7 @@ const updateLeaveStatus = async (req, res) => {
         const io = req.app.get('io');
         await NotificationService.createNotification(io, {
             user: request.user,
+            companyId: req.companyId,
             title: `Leave Request ${status}`,
             message: `Your leave request for ${request.daysCount} days of ${request.leaveType} has been ${status.toLowerCase()}.`,
             type: status === 'Approved' ? 'Info' : 'Alert',

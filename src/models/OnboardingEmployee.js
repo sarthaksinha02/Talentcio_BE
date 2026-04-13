@@ -208,6 +208,11 @@ const onboardingEmployeeSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    candidateId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Candidate',
+        default: null
+    },
     transferredToUserId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

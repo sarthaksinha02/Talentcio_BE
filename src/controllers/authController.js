@@ -229,7 +229,6 @@ const verifyOtpAndResetPassword = async (req, res) => {
         user.isPasswordResetRequired = false;
         user.otp = null;
         user.otpExpires = null;
-        user.tokenVersion = (user.tokenVersion || 0) + 1; // Invalidate old tokens if any
         
         await user.save();
 

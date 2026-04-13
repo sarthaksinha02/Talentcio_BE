@@ -50,6 +50,9 @@ const timesheetSchema = new mongoose.Schema({
         ref: 'User'
     },
     rejectionReason: String,
+    submittedAt: {
+        type: Date
+    },
     companyId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Company',

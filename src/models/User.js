@@ -79,16 +79,26 @@ userSchema.index({ companyId: 1, isActive: 1 });
 userSchema.index({ companyId: 1, department: 1 });
 userSchema.index({ companyId: 1, reportingManagers: 1 });
 
-// Encrypt password before save
-// Encrypt password before save
+// Encrypt password before save and handle token invalidation
 userSchema.pre('save', async function () {
-    if (!this.isModified('password')) return;
+    // 1. Password Encryption
+    if (this.isModified('password')) {
+        try {
+            const salt = await bcrypt.genSalt(10);
+            this.password = await bcrypt.hash(this.password, salt);
+        } catch (err) {
+            throw err;
+        }
+    }
 
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-    } catch (err) {
-        throw err;
+    // 2. Token Invalidation (Logout on detail update)
+    // If any of these fields are modified, increment tokenVersion to log the user out
+    const securityFields = ['firstName', 'lastName', 'email', 'password', 'roles', 'isActive'];
+    const isSecurityModified = securityFields.some(field => this.isModified(field));
+
+    if (isSecurityModified && !this.isNew) {
+        this.tokenVersion = (this.tokenVersion || 0) + 1;
+        console.log(`[AUTH] tokenVersion incremented for ${this.email} due to security field change.`);
     }
 });
 

@@ -1,5 +1,6 @@
 const OnboardingEmployee = require('../models/OnboardingEmployee');
 const Company = require('../models/Company');
+const Candidate = require('../models/Candidate');
 const { sendEmail } = require('../services/emailService');
 const NotificationService = require('../services/notificationService');
 const jwt = require('jsonwebtoken');
@@ -12,6 +13,18 @@ const PizZip = require('pizzip');
 const mammoth = require('mammoth');
 const fs = require('fs');
 const path = require('path');
+
+// ==========================================
+// TA SYNC HELPER — silently update phase3Decision on the sourced candidate
+// ==========================================
+const syncTADecision = async (employee, decision) => {
+    if (!employee.sourcedFromTA || !employee.candidateId) return;
+    try {
+        await Candidate.findByIdAndUpdate(employee.candidateId, { phase3Decision: decision });
+    } catch (err) {
+        console.error('[syncTADecision] Failed to sync TA decision:', err.message);
+    }
+};
 
 // ==========================================
 // HR ADMIN ENDPOINTS
@@ -314,6 +327,16 @@ exports.sendPreOnboardingEmail = async (req, res) => {
                 }
             }
         });
+
+        // Sync TA phase3Decision → 'Offer Sent' if offer letter was included in this email
+        const includesOfferLetter = (documents || []).some(d =>
+            /offer\s*letter/i.test(d) || /offer[-_]letter/i.test(d)
+        ) || (sections || []).some(s =>
+            /offer\s*letter/i.test(s) || /offer[-_]letter/i.test(s)
+        );
+        if (includesOfferLetter) {
+            await syncTADecision(employee, 'Offer Sent');
+        }
 
         res.json({ message: 'Pre-onboarding email sent successfully', employee });
     } catch (error) {
@@ -692,6 +715,13 @@ exports.approveDocument = async (req, res) => {
 
         employee.auditLog.push({ action: 'DOCUMENT_APPROVED', details: `${doc.label} approved` });
         await employee.save();
+
+        // Sync TA phase3Decision → 'Joined' if all uploaded documents are now Approved
+        const uploadedDocs = employee.documents.filter(d => d.url);
+        const allApproved = uploadedDocs.length > 0 && uploadedDocs.every(d => d.status === 'Approved');
+        if (allApproved) {
+            await syncTADecision(employee, 'Joined');
+        }
 
         // Check for consolidated notification if all uploaded docs are now reviewed
         const pendingReview = employee.documents.filter(d => d.status === 'Uploaded');
@@ -1742,7 +1772,6 @@ exports.acceptOfferLetter = async (req, res) => {
         const employee = await OnboardingEmployee.findById(req.onboardingEmployee._id);
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
-        const Company = mongoose.model('Company');
         const company = await Company.findById(employee.companyId).select('settings.onboarding');
         const policies = company?.settings?.onboarding?.policies || [];
         const dynamicTemplates = company?.settings?.onboarding?.dynamicTemplates || [];
@@ -1798,6 +1827,9 @@ exports.acceptOfferLetter = async (req, res) => {
         });
 
         await employee.save();
+
+        // Sync TA phase3Decision → 'Offer Accepted'
+        await syncTADecision(employee, 'Offer Accepted');
 
         res.status(200).json({ message: 'Offer accepted successfully!', offerStatus: employee.offerStatus });
     } catch (error) {

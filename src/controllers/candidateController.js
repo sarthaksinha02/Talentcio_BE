@@ -150,6 +150,7 @@ exports.createCandidate = async (req, res) => {
             };
 
             compareAndUpdate('candidateName', candidateName, 'Name');
+            compareAndUpdate('mobile', mobile, 'Mobile');
             compareAndUpdate('source', source, 'Source');
             compareAndUpdate('profilePulledBy', profilePulledBy, 'Pulled By');
             compareAndUpdate('calledBy', calledBy, 'Called By');
@@ -168,6 +169,7 @@ exports.createCandidate = async (req, res) => {
             compareAndUpdate('noticePeriod', noticePeriod, 'Notice Period');
             compareAndUpdate('lastWorkingDay', lastWorkingDay, 'DOJ/LWD');
             compareAndUpdate('status', status, 'Status');
+            compareAndUpdate('decision', req.body.decision, 'Decision');
             compareAndUpdate('remark', remark, 'Remark');
 
             if (mustHaveSkills && Array.isArray(mustHaveSkills)) {
@@ -262,13 +264,14 @@ exports.createCandidate = async (req, res) => {
             tatToJoin,
             noticePeriod,
             lastWorkingDay,
-            status: status || 'Interested',
+            decision: req.body.decision || 'None',
+            status: status,
             remark,
             mustHaveSkills: mustHaveSkills || [],
             niceToHaveSkills: niceToHaveSkills || [],
             interviewRounds: interviewRounds || [],
             statusHistory: [{
-                status: status || 'Interested',
+                status: status,
                 changedBy: req.user._id,
                 changedAt: new Date(),
                 remark
@@ -1301,9 +1304,12 @@ exports.transferToOnboarding = async (req, res) => {
             return res.status(404).json({ message: 'Candidate not found' });
         }
 
-        // Validation: Ensure a Phase 3 decision is set
-        if (!candidate.phase3Decision || candidate.phase3Decision === 'None') {
-            return res.status(400).json({ message: 'A Phase 3 decision must be set before transferring to onboarding' });
+        // Validation: Ensure a valid decision is set (Phase 3 decision or Phase 2 Selected)
+        const hasPhase3Decision = candidate.phase3Decision && candidate.phase3Decision !== 'None';
+        const hasPhase2Selected = candidate.phase2Decision === 'Selected';
+
+        if (!hasPhase3Decision && !hasPhase2Selected) {
+            return res.status(400).json({ message: 'A valid decision (Selected in Phase 2 or any Phase 3 decision) must be set before transferring to onboarding' });
         }
 
         if (candidate.isTransferredToOnboarding) {
@@ -1351,6 +1357,7 @@ exports.transferToOnboarding = async (req, res) => {
             companyId: req.companyId,
             createdBy: req.user._id,
             sourcedFromTA: true,
+            candidateId: candidate._id,
             tempEmployeeId,
             tempPassword, // hashed in pre-save
             firstName,

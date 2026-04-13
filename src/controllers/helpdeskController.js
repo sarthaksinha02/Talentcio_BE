@@ -1,6 +1,7 @@
 const HelpdeskQuery = require('../models/HelpdeskQuery');
 const QueryType = require('../models/QueryType');
 const User = require('../models/User');
+const Role = require('../models/Role');
 const Company = require('../models/Company');
 const NotificationService = require('../services/notificationService');
 const { calculateWorkHours } = require('../services/helpdeskUtils');
@@ -129,21 +130,76 @@ exports.createQuery = async (req, res) => {
 
         await newQuery.save();
 
+        // --- BULLETPROOF NOTIFICATIONS ---
+        const io = req.app.get('io');
+        const notificationTargets = new Set();
+        
+        // 1. Specific Assigned Person (Immediate Priority)
         if (qType.assignedPerson) {
-            const io = req.app.get('io');
-            await NotificationService.createNotification(io, {
-                user: qType.assignedPerson,
-                companyId: req.companyId,
-                title: 'New Helpdesk Query',
-                message: `You have been assigned a new ${priority || 'Medium'} priority query: "${subject}"`,
-                type: 'Alert',
-                link: '/helpdesk'
-            });
+            notificationTargets.add(qType.assignedPerson.toString());
         }
+
+        // 2. Broadcast to Admins and Support Roles (Case-Insensitive)
+        const roleRegex = /admin|system|super|it|hr/i;
+        const roles = await Role.find({
+            companyId: req.companyId,
+            $or: [
+                { name: { $regex: roleRegex } },
+                { _id: qType.assignedRole }
+            ]
+        }).select('_id name');
+        
+        const targetRoleIds = roles.map(r => r._id);
+        // console.log(`[NOTIF DEBUG] Found ${roles.length} matching roles: ${roles.map(r => r.name).join(', ')}`);
+
+        // 3. Find all users with those roles
+        if (targetRoleIds.length > 0) {
+            const usersWithRoles = await User.find({
+                companyId: req.companyId,
+                isActive: true,
+                roles: { $in: targetRoleIds }
+            }).select('_id');
+            usersWithRoles.forEach(u => notificationTargets.add(u._id.toString()));
+        }
+
+        // 4. Cleanup & Logging
+        notificationTargets.delete(req.user._id.toString()); // Don't notify the raiser twice
+        // console.log(`[NOTIF DEBUG] Total unique notification targets: ${notificationTargets.size}`);
+        // if (!io) console.warn('[NOTIF WARNING] Socket.io instance (io) NOT found in app context!');
+
+        const notificationsData = Array.from(notificationTargets).map(userId => ({
+            user: userId,
+            companyId: req.companyId,
+            title: 'New Helpdesk Query',
+            message: `A new ${priority || 'Medium'} priority query has been raised: "${subject}"`,
+            type: 'Alert',
+            link: `/helpdesk`
+        }));
+
+        if (notificationsData.length > 0) {
+            await NotificationService.createManyNotifications(io, notificationsData);
+        }
+
+        // 5. Notify the raiser as well (Confirmation)
+        await NotificationService.createNotification(io, {
+            user: req.user._id,
+            companyId: req.companyId,
+            title: 'Query Raised Successfully',
+            message: `Your query "${subject}" has been submitted and is being reviewed.`,
+            type: 'Info',
+            link: `/helpdesk`
+        });
+
+        // POPULATE FOR INSTANT UI UPDATE
+        const populatedQuery = await HelpdeskQuery.findById(newQuery._id)
+            .populate('raisedBy', 'firstName lastName email profilePicture')
+            .populate('assignedTo', 'firstName lastName email profilePicture')
+            .populate('queryType', 'name')
+            .lean();
 
         res.status(201).json({
             success: true,
-            data: newQuery
+            data: populatedQuery
         });
 
     } catch (error) {

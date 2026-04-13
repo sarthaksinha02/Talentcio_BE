@@ -10,7 +10,7 @@ exports.getMyNotifications = async (req, res) => {
             .sort({ createdAt: -1 })
             .limit(50)
             .lean(); // Keep it to a reasonable maximum for performance
-            
+
         res.status(200).json(notifications);
     } catch (error) {
         console.error('Error fetching notifications:', error);

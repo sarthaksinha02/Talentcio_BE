@@ -14,9 +14,9 @@ class NotificationService {
             const notification = new Notification(data);
             await notification.save();
 
-            if (io) {
-                // Emit to the specific user's room
-                io.to(data.user.toString()).emit('notification', notification);
+            if (this.verifySocket(io)) {
+                // Emit a plain object (not raw Mongoose doc) to avoid serialization issues
+                io.to(data.user.toString()).emit('notification', notification.toObject());
             }
 
             return notification;
@@ -35,9 +35,10 @@ class NotificationService {
         try {
             const notifications = await Notification.insertMany(notificationsData);
 
-            if (io) {
+            if (this.verifySocket(io)) {
                 notifications.forEach(notification => {
-                    io.to(notification.user.toString()).emit('notification', notification);
+                    // Emit a plain object (not raw Mongoose doc) to avoid serialization issues
+                    io.to(notification.user.toString()).emit('notification', notification.toObject());
                 });
             }
 
@@ -46,6 +47,17 @@ class NotificationService {
             console.error('Error in NotificationService.createManyNotifications:', error);
             throw error;
         }
+    }
+
+    /**
+     * Internal helper to verify socket availability
+     */
+    static verifySocket(io) {
+        if (!io) {
+            console.warn('[NOTIF WARNING] Attempted to send notification but Socket.io (io) is undefined. Ensure app.set("io", io) is called in server setup.');
+            return false;
+        }
+        return true;
     }
 
     /**
