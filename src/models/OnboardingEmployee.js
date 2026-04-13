@@ -37,7 +37,6 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     tempEmployeeId: {
         type: String,
         required: true,
-        unique: true,
         index: true
     },
     tempPassword: {
