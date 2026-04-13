@@ -99,7 +99,6 @@ const updateUserRole = async (req, res) => {
         }
 
         user.roles = [roleId];
-        user.tokenVersion = (user.tokenVersion || 0) + 1;
         await user.save();
 
         res.json({ message: 'User role updated' });
@@ -139,7 +138,6 @@ const updateUser = async (req, res) => {
                 const role = await Role.findOne({ _id: roleId, companyId: req.companyId });
                 if (role) {
                     user.roles = [roleId];
-                    user.tokenVersion = (user.tokenVersion || 0) + 1;
                 }
             }
         }
@@ -342,8 +340,6 @@ const toggleUserStatus = async (req, res) => {
         }
 
         user.isActive = !user.isActive;
-        // Invalidate tokens if deactivating
-        user.tokenVersion = (user.tokenVersion || 0) + 1;
         
         await user.save();
 
