@@ -327,7 +327,7 @@ const getManagerApprovals = async (req, res) => {
             (typeof r === 'string' ? r : r.name) === 'Admin'
         );
 
-        const { status } = req.query;
+        const { status, userIds } = req.query;
         let query = { companyId: req.companyId };
         
         if (status && status !== 'All') {
@@ -341,14 +341,28 @@ const getManagerApprovals = async (req, res) => {
         if (!isAdmin) {
             // Managers only see their direct reports' requests
             const subordinates = await User.find({ reportingManagers: req.user._id, companyId: req.companyId }).select('_id');
-            const subordinateIds = subordinates.map(u => u._id);
+            const subordinateIds = subordinates.map(u => u._id.toString());
 
             if (subordinateIds.length === 0) {
                 return res.json([]);
             }
-            query.user = { $in: subordinateIds };
+
+            if (userIds) {
+                const requestedUserIds = userIds.split(',').filter(Boolean);
+                // Intersect requested with allowed subordinates
+                const allowedIds = requestedUserIds.filter(id => subordinateIds.includes(id));
+                query.user = { $in: allowedIds };
+            } else {
+                query.user = { $in: subordinateIds };
+            }
+        } else if (userIds) {
+            // Admin: no restriction, just filter if userIds provided
+            const requestedUserIds = userIds.split(',').filter(Boolean);
+            if (requestedUserIds.length > 0) {
+                query.user = { $in: requestedUserIds };
+            }
         }
-        // Admins: no user filter — see all pending requests across the org
+        // Admins: if no userIds provided, see all pending requests across the org
 
         const [requests, configs] = await Promise.all([
             LeaveRequest.find(query)

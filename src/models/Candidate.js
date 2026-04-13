@@ -162,14 +162,13 @@ const candidateSchema = new mongoose.Schema({
     // Status Tracking
     status: {
         type: String,
-        enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'In Interview'],
-        required: true,
-        default: 'Interested'
+        enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'In Interview', ''],
+        required: false
     },
     statusHistory: [{
         status: {
             type: String,
-            enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'In Interview'],
+            enum: ['Interested', 'Not Interested', 'Not Relevant', 'Not Picking', 'In Interview', ''],
         },
         changedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -223,21 +222,19 @@ const candidateSchema = new mongoose.Schema({
     // Hiring Decision
     decision: {
         type: String,
-        enum: ['Shortlisted', 'Rejected', 'On Hold', 'None'],
-        default: 'None'
+        enum: ['Shortlisted', 'Rejected', 'On Hold', 'None', '']
     },
 
     // Phase 2 Client Decision
     phase2Decision: {
         type: String,
-        enum: ['Shortlisted', 'Selected', 'Rejected', 'On Hold', 'None'],
-        default: 'None'
+        enum: ['Shortlisted', 'Selected', 'Rejected', 'On Hold', 'None', '']
     },
 
     // Phase 3 Offer & Onboarding Decision
     phase3Decision: {
         type: String,
-        enum: ['Offer Sent', 'Offer Accepted', 'Offer Declined', 'Joined', 'No Show', 'None'],
+        enum: ['Offer Sent', 'Offer Accepted', 'Offer Declined', 'Joined', 'No Show', 'None', ''],
         default: 'None'
     },
 

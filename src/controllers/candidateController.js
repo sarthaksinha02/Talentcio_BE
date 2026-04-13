@@ -265,13 +265,13 @@ exports.createCandidate = async (req, res) => {
             noticePeriod,
             lastWorkingDay,
             decision: req.body.decision || 'None',
-            status: status || 'Interested',
+            status: status,
             remark,
             mustHaveSkills: mustHaveSkills || [],
             niceToHaveSkills: niceToHaveSkills || [],
             interviewRounds: interviewRounds || [],
             statusHistory: [{
-                status: status || 'Interested',
+                status: status,
                 changedBy: req.user._id,
                 changedAt: new Date(),
                 remark
