@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -8,6 +9,9 @@ const connectDB = require('./db');
 
 const app = express();
 const server = http.createServer(app);
+
+// Use helmet first for security headers
+app.use(helmet());
 
 // --- CORS CONFIGURATION (MUST BE AT THE TOP) ---
 const allowedOrigins = [
@@ -26,11 +30,11 @@ const corsOptions = {
         if (!origin) return callback(null, true);
 
         const normalizedOrigin = origin.replace(/\/$/, "");
-        const isAllowed = allowedOrigins.some(allowed =>
-            normalizedOrigin === allowed.replace(/\/$/, "") ||
+        const isAllowed = allowedOrigins.some(allowed => normalizedOrigin === allowed.replace(/\/$/, "")) ||
+            normalizedOrigin.endsWith('.talentcio.com') ||
+            normalizedOrigin.endsWith('.telentcio.com') ||
             normalizedOrigin.includes('localhost') ||
-            normalizedOrigin.includes('127.0.0.1')
-        );
+            normalizedOrigin.includes('127.0.0.1');
 
         if (isAllowed) {
             callback(null, true);
@@ -141,8 +145,10 @@ const analyticsRoutes = require('./src/routes/analyticsRoutes');
 const planRoutes = require('./src/routes/planRoutes');
 const superAdminMiscRoutes = require('./src/routes/superAdminMiscRoutes');
 
-// Multi-tenant Middleware
+// Multi-tenant & Licensing Middleware
 const tenantMiddleware = require('./src/middlewares/tenantMiddleware');
+const planGuard = require('./src/middlewares/planGuard');
+const { globalLimiter } = require('./src/middlewares/rateLimitMiddleware');
 
 // Database Connection & Init
 const initServer = async () => {
@@ -157,7 +163,15 @@ initServer();
 // Mount Routes (Tenant-Facing)
 app.use('/api', (req, res, next) => {
     if (req.path.startsWith('/superadmin')) return next();
-    tenantMiddleware(req, res, next);
+    globalLimiter(req, res, next);
+});
+
+app.use('/api', (req, res, next) => {
+    if (req.path.startsWith('/superadmin')) return next();
+    tenantMiddleware(req, res, (err) => {
+        if (err) return next(err);
+        planGuard(req, res, next);
+    });
 });
 
 app.use('/api/auth', authRoutes);

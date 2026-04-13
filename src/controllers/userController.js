@@ -41,6 +41,17 @@ const createUser = async (req, res) => {
             return res.status(400).json({ message: 'User already exists' });
         }
 
+        // Plan Enforcement: Check maxUsers
+        const company = await Company.findById(req.companyId).populate('planId');
+        if (company && company.planId) {
+            const activeUserCount = await User.countDocuments({ companyId: req.companyId, isActive: true });
+            if (activeUserCount >= company.planId.maxUsers) {
+                return res.status(403).json({
+                    message: `User limit reached (${company.planId.maxUsers}). Please upgrade your plan to add more users.`
+                });
+            }
+        }
+
         // Validate Role
         const role = await Role.findOne({ _id: roleId, companyId: req.companyId });
         if (!role) {
@@ -226,12 +237,12 @@ const getMyself = async (req, res) => {
         }
 
         let isInterviewer = false;
-        
+
         // Final concurrent batch for TA/Interviewer checks if not already determined
         if (taCount === 0 && !permissions.includes('ta.view') && !permissions.includes('*')) {
-            const interviewCount = await Candidate.countDocuments({ 
-                'interviewRounds.assignedTo': req.user._id, 
-                companyId: effectiveCompanyId 
+            const interviewCount = await Candidate.countDocuments({
+                'interviewRounds.assignedTo': req.user._id,
+                companyId: effectiveCompanyId
             });
             isInterviewer = interviewCount > 0;
         }
@@ -281,9 +292,9 @@ const getUserById = async (req, res) => {
         }
 
         // Fetch direct reports to allow frontend checkbox pre-filling
-        const directReports = await User.find({ 
-            reportingManagers: user._id, 
-            companyId: req.companyId 
+        const directReports = await User.find({
+            reportingManagers: user._id,
+            companyId: req.companyId
         }).select('_id firstName lastName email').lean();
 
         user.directReports = directReports;
@@ -340,12 +351,12 @@ const toggleUserStatus = async (req, res) => {
         }
 
         user.isActive = !user.isActive;
-        
+
         await user.save();
 
-        res.json({ 
+        res.json({
             message: `User ${user.isActive ? 'activated' : 'deactivated'} successfully`,
-            isActive: user.isActive 
+            isActive: user.isActive
         });
     } catch (error) {
         console.error(error);

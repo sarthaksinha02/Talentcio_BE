@@ -44,7 +44,7 @@ const requireModule = (moduleIds) => async (req, res, next) => {
 
         next();
     } catch (err) {
-        console.error(`[ModuleGuard] Error checking module '${moduleId}':`, err);
+        console.error(`[ModuleGuard] Error checking module '${moduleIds}':`, err);
         res.status(500).json({ message: 'Error verifying module access.' });
     }
 };

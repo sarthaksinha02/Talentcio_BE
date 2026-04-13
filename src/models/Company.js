@@ -19,12 +19,12 @@ const companySchema = new mongoose.Schema({
         // Branding
         logo: { type: String, default: '' },
         themeColor: { type: String, default: '#6366f1' },
-        
+
         // HR & General Settings
         leavePolicy: { type: String, default: '' },
         attendanceRules: { type: String, default: '' },
         overtimeRules: { type: String, default: '' },
-        
+
         // Module Specific Configurations
         onboarding: {
             offerLetterTemplateUrl: { type: String, default: '' },
@@ -59,10 +59,10 @@ const companySchema = new mongoose.Schema({
             allowedIps: { type: [String], default: [] }
         },
         timesheet: {
-            approvalCycle: { 
-                type: String, 
-                enum: ['Daily', 'Weekly', 'Bi-Weekly', 'Monthly'], 
-                default: 'Monthly' 
+            approvalCycle: {
+                type: String,
+                enum: ['Daily', 'Weekly', 'Bi-Weekly', 'Monthly'],
+                default: 'Monthly'
             },
             exportFormat: { type: String, default: 'Standard' },
             allowPastEntries: { type: Boolean, default: true },
@@ -72,6 +72,7 @@ const companySchema = new mongoose.Schema({
     },
     employeeCount: { type: Number, default: 0 },
     activeUserCount: { type: Number, default: 0 },
+    trialEndsAt: { type: Date }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Company', companySchema);

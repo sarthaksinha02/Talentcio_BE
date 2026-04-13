@@ -16,7 +16,7 @@ const cleanupStaleIndexes = async () => {
         const targetCollections = [
             'roles', 'timesheets', 'hiringrequests', 'worklogs', 'attendance', 
             'querytypes', 'leavebalances', 'leaveconfigs', 'holidays', 
-            'projects', 'modules', 'tasks', 'helpdeskqueries', 'candidates'
+            'projects', 'modules', 'tasks', 'helpdeskqueries', 'candidates', 'users'
         ];
 
         for (const collName of targetCollections) {

@@ -70,12 +70,13 @@ const createCompany = async (req, res) => {
             return res.status(400).json({ message: `Subdomain '${companyData.subdomain}' is already taken. Please choose another one.` });
         }
 
-        const existingUser = await User.findOne({ email: adminUser.email.toLowerCase() });
-        if (existingUser) {
-            return res.status(400).json({ message: `The email '${adminUser.email}' is already registered as a user. Please use a different admin email.` });
+        // 2. Creation Process
+        if (companyData.status === 'Trial' && !companyData.trialEndsAt) {
+            const plan = await require('../models/Plan').findById(companyData.planId);
+            const trialDays = plan ? plan.trialDays : 14;
+            companyData.trialEndsAt = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000);
         }
 
-        // 2. Creation Process
         const company = await Company.create(companyData);
         let adminRole = null;
         let createdUser = null;
@@ -112,7 +113,7 @@ const createCompany = async (req, res) => {
             if (createdUser) await User.findByIdAndDelete(createdUser._id);
             if (adminRole) await Role.findByIdAndDelete(adminRole._id);
             if (company) await Company.findByIdAndDelete(company._id);
-            
+
             throw innerErr; // re-throw to be caught by outer catch
         }
 
