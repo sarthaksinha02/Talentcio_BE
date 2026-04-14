@@ -12,44 +12,52 @@ const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
 
-// Helmet first — but disable its cross-origin header overrides so our CORS middleware works
+// CORS — must be first, before helmet and everything else
+const allowedOriginsList = [
+    'https://telentcio.vercel.app',
+    'https://talentcio.vercel.app',
+    'http://localhost:3000',
+    'https://telentcio-demo.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5000',
+    'https://talent-cio-super-admin.vercel.app',
+    'https://talentcio-super-admin.vercel.app'
+];
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, curl, Postman)
+        if (!origin) return callback(null, true);
+        if (allowedOriginsList.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error(`CORS policy: Origin ${origin} not allowed`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
+    optionsSuccessStatus: 204
+}));
+
+// Explicitly handle pre-flight for ALL routes
+app.options('*', cors({
+    origin: function (origin, callback) {
+        if (!origin) return callback(null, true);
+        if (allowedOriginsList.includes(origin)) return callback(null, true);
+        return callback(new Error(`CORS policy: Origin ${origin} not allowed`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
+    optionsSuccessStatus: 204
+}));
+
+// Helmet — after CORS, with cross-origin policies disabled to avoid header conflicts
 app.use(helmet({
     crossOriginResourcePolicy: false,
     crossOriginOpenerPolicy: false,
 }));
-
-// --- CUSTOM CORS MIDDLEWARE ---
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-
-    // List of allowed origins
-    const allowedOriginsList = [
-        'https://telentcio.vercel.app',
-        'https://talentcio.vercel.app',
-        'http://localhost:3000',
-        'https://telentcio-demo.vercel.app',
-        'http://localhost:5173',
-        'http://localhost:5174',
-        'http://localhost:5000',
-        'https://talent-cio-super-admin.vercel.app',
-        'https://talentcio-super-admin.vercel.app'
-    ];
-
-    if (origin && allowedOriginsList.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Accept, Cache-Control, Pragma, X-Requested-With, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
-
-    if (req.method === 'OPTIONS') {
-        return res.status(204).end();
-    }
-
-    next();
-});
-// ----------------------------------------------
 
 // Setup Socket.IO
 const io = new Server(server, {
