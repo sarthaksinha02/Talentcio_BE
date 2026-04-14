@@ -41,7 +41,7 @@ app.use(cors({
 }));
 
 // Explicitly handle pre-flight for ALL routes
-app.options('*', cors({
+app.options('/{*path}', cors({
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
         if (allowedOriginsList.includes(origin)) return callback(null, true);
