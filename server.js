@@ -10,9 +10,6 @@ const connectDB = require('./db');
 const app = express();
 const server = http.createServer(app);
 
-// Use helmet first for security headers
-app.use(helmet());
-
 // --- CORS CONFIGURATION (MUST BE AT THE TOP) ---
 const allowedOrigins = [
     'https://telentcio.vercel.app',
@@ -28,22 +25,26 @@ const allowedOrigins = [
 
 const corsOptions = {
     origin: function (origin, callback) {
-        // Allow if no origin (like mobile or same-origin)
+        // Allow if no origin (usually for non-browser clients)
         if (!origin) return callback(null, true);
 
         const normalizedOrigin = origin.replace(/\/$/, "");
-        const isAllowed = allowedOrigins.some(allowed => normalizedOrigin === allowed.replace(/\/$/, "")) ||
+
+        // Very explicit check for the super admin origins
+        const isSuperAdmin = normalizedOrigin.includes('talent-cio-super-admin.vercel.app') ||
+            normalizedOrigin.includes('talentcio-super-admin.vercel.app');
+
+        const isAllowed = isSuperAdmin ||
+            allowedOrigins.some(allowed => normalizedOrigin === allowed.replace(/\/$/, "")) ||
             normalizedOrigin.endsWith('.talentcio.com') ||
             normalizedOrigin.endsWith('.telentcio.com') ||
-            normalizedOrigin.endsWith('.vercel.app') || // Broadly allow vercel apps for testing if needed
+            normalizedOrigin.endsWith('.vercel.app') ||
             normalizedOrigin.includes('localhost') ||
             normalizedOrigin.includes('127.0.0.1');
 
         if (isAllowed) {
             callback(null, true);
         } else {
-            // Optional: You can log blocked origins here to debug
-            // console.log(`Origin ${origin} not allowed by CORS`);
             callback(null, false);
         }
     },
@@ -66,7 +67,16 @@ const corsOptions = {
 
 // Apply CORS globally before ANY other middleware
 app.use(cors(corsOptions));
-// ----------------------------------------------
+// Explicit manual preflight handler
+app.options(/.*/, (req, res) => {
+    res.header('Access-Control-Allow-Origin', req.header('Origin'));
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Accept, Cache-Control, Pragma, X-Requested-With, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.sendStatus(204);
+});
+
+app.use(helmet());
 
 // Setup Socket.IO
 const io = new Server(server, {
