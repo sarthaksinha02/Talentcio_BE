@@ -12,21 +12,19 @@ const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
 
-// CORS — allow all origins
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
-    optionsSuccessStatus: 204
-}));
+// CORS — raw middleware, runs before everything, no path-to-regexp involved
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Accept, Cache-Control, Pragma, X-Requested-With');
 
-// Explicitly handle pre-flight for ALL routes
-app.options('/{*path}', cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
-    optionsSuccessStatus: 204
-}));
+    // Intercept preflight immediately — no downstream middleware needed
+    if (req.method === 'OPTIONS') {
+        return res.status(204).end();
+    }
+
+    next();
+});
 
 // Helmet — after CORS, with cross-origin policies disabled to avoid header conflicts
 app.use(helmet({
