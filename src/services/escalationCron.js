@@ -15,12 +15,13 @@ const startEscalationCron = (io) => {
             }).populate('queryType');
 
             const now = new Date();
-            // Try to find a system admin for comment attribution
-            const systemAdmin = await User.findOne({ 'roles.name': 'Admin' }).lean();
 
             for (const query of pendingQueries) {
                 // Determine the threshold and company settings
                 const qType = query.queryType;
+
+                // Find a system admin for comment attribution within this company
+                const systemAdmin = await User.findOne({ companyId: query.companyId, 'roles.name': 'Admin' }).lean();
                 const escalationDays = (qType && qType.enableEscalation && qType.escalationDays) ? qType.escalationDays : 2;
                 const thresholdHours = escalationDays * 24;
 

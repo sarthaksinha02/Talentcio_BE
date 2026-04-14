@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -7,51 +8,39 @@ const mongoose = require('mongoose');
 const connectDB = require('./db');
 
 const app = express();
+// Trust the first proxy (Render) so rate limiting uses correct client IPs
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
-// --- CORS CONFIGURATION (MUST BE AT THE TOP) ---
-const allowedOrigins = [
-    'https://telentcio.vercel.app',
-    'https://talentcio.vercel.app',
-    'http://localhost:3000',
-    'https://telentcio-demo.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://localhost:5000'
-];
+// CORS — raw middleware, runs before everything, no path-to-regexp involved
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Accept, Cache-Control, Pragma, X-Requested-With');
 
-const corsOptions = {
-    origin: function (origin, callback) {
-        // Allow if no origin (like mobile or same-origin)
-        if (!origin) return callback(null, true);
+    // Intercept preflight immediately — no downstream middleware needed
+    if (req.method === 'OPTIONS') {
+        return res.status(204).end();
+    }
 
-        const normalizedOrigin = origin.replace(/\/$/, "");
-        const isAllowed = allowedOrigins.some(allowed =>
-            normalizedOrigin === allowed.replace(/\/$/, "") ||
-            normalizedOrigin.includes('localhost') ||
-            normalizedOrigin.includes('127.0.0.1')
-        );
+    next();
+});
 
-        if (isAllowed) {
-            callback(null, true);
-        } else {
-            callback(null, false);
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
-    optionsSuccessStatus: 204
-};
-
-// Apply CORS globally before ANY other middleware
-app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions)); // Explicitly handle all preflight requests
-// ----------------------------------------------
+// Helmet — after CORS, with cross-origin policies disabled to avoid header conflicts
+app.use(helmet({
+    crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: false,
+}));
 
 // Setup Socket.IO
 const io = new Server(server, {
-    cors: corsOptions
+    cors: {
+        origin: function (origin, callback) {
+            callback(null, true);
+        },
+        credentials: true,
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    }
 });
 
 // Expose io to routes
@@ -141,8 +130,10 @@ const analyticsRoutes = require('./src/routes/analyticsRoutes');
 const planRoutes = require('./src/routes/planRoutes');
 const superAdminMiscRoutes = require('./src/routes/superAdminMiscRoutes');
 
-// Multi-tenant Middleware
+// Multi-tenant & Licensing Middleware
 const tenantMiddleware = require('./src/middlewares/tenantMiddleware');
+const planGuard = require('./src/middlewares/planGuard');
+const { globalLimiter } = require('./src/middlewares/rateLimitMiddleware');
 
 // Database Connection & Init
 const initServer = async () => {
@@ -157,7 +148,15 @@ initServer();
 // Mount Routes (Tenant-Facing)
 app.use('/api', (req, res, next) => {
     if (req.path.startsWith('/superadmin')) return next();
-    tenantMiddleware(req, res, next);
+    globalLimiter(req, res, next);
+});
+
+app.use('/api', (req, res, next) => {
+    if (req.path.startsWith('/superadmin')) return next();
+    tenantMiddleware(req, res, (err) => {
+        if (err) return next(err);
+        planGuard(req, res, next);
+    });
 });
 
 app.use('/api/auth', authRoutes);

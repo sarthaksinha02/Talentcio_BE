@@ -37,7 +37,6 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     tempEmployeeId: {
         type: String,
         required: true,
-        unique: true,
         index: true
     },
     tempPassword: {
@@ -92,7 +91,7 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['Pending', 'In Progress', 'Submitted', 'Reviewed'],
+        enum: ['Pending', 'Accepted', 'In Progress', 'Submitted', 'Reviewed'],
         default: 'Pending'
     },
 

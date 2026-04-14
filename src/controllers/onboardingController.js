@@ -151,7 +151,7 @@ exports.addEmployee = async (req, res) => {
     } catch (error) {
         console.error('Error adding onboarding employee:', error);
         if (error.code === 11000) {
-            return res.status(400).json({ message: 'Duplicate entry. This employee may already exist.' });
+            return res.status(400).json({ message: 'Duplicate entry detected. This employee may already exist.', error: error.message });
         }
         res.status(500).json({ message: 'Server error', error: error.message });
     }
@@ -513,7 +513,7 @@ exports.getOnboardingList = async (req, res) => {
             { $group: { _id: '$status', count: { $sum: 1 } } }
         ]);
 
-        const statusCounts = { Pending: 0, 'In Progress': 0, Submitted: 0, Reviewed: 0 };
+        const statusCounts = { Pending: 0, Accepted: 0, 'In Progress': 0, Submitted: 0, Reviewed: 0 };
         stats.forEach(s => { statusCounts[s._id] = s.count; });
 
         res.status(200).json({
@@ -1818,8 +1818,8 @@ exports.acceptOfferLetter = async (req, res) => {
 
         // 4. Update overall status
         employee.offerStatus = 'Accepted';
-        employee.status = 'In Progress';
-        employee.offerDeclaration.isComplete = true; // Mark acceptance section as complete
+        employee.status = 'Accepted';
+        // employee.offerDeclaration.isComplete = true; // REMOVED: Declaration should be a separate step
 
         employee.auditLog.push({
             action: 'OFFER_ACCEPTED',

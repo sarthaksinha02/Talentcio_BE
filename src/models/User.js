@@ -5,7 +5,6 @@ const userSchema = new mongoose.Schema({
     email: {
         type: String,
         required: true,
-        unique: true,
         lowercase: true,
         trim: true
     },
@@ -78,6 +77,8 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ companyId: 1, isActive: 1 });
 userSchema.index({ companyId: 1, department: 1 });
 userSchema.index({ companyId: 1, reportingManagers: 1 });
+userSchema.index({ companyId: 1, email: 1 }, { unique: true });
+userSchema.index({ companyId: 1, employeeCode: 1 }, { unique: true, sparse: true });
 
 // Encrypt password before save and handle token invalidation
 userSchema.pre('save', async function () {

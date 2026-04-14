@@ -16,15 +16,18 @@ const generateToken = (id, tokenVersion) => {
 // @route   POST /api/auth/register
 // @access  Public
 const register = async (req, res) => {
+
+
     const { email, password, firstName, lastName } = req.body;
 
     try {
-        const userExists = await User.findOne({ email });
+        const userExists = await User.findOne({ email, companyId: req.companyId });
         if (userExists) {
-            return res.status(400).json({ message: 'User already exists' });
+            return res.status(400).json({ message: 'User already exists in this workspace.' });
         }
 
         const user = await User.create({
+            companyId: req.companyId,
             firstName,
             lastName,
             email,
@@ -51,10 +54,16 @@ const register = async (req, res) => {
 // @route   POST /api/auth/login
 // @access  Public
 const loginUser = async (req, res) => {
+
+
     const { email, password } = req.body;
 
     try {
-        const user = await User.findOne({ email }).populate({
+        if (!req.companyId) {
+            return res.status(401).json({ message: 'Invalid email or password' });
+        }
+
+        const user = await User.findOne({ email, companyId: req.companyId }).populate({
             path: 'roles',
             populate: {
                 path: 'permissions'
@@ -63,7 +72,7 @@ const loginUser = async (req, res) => {
 
         // Check if user exists and password is correct
         if (!user || !(await user.matchPassword(password))) {
-             return res.status(401).json({ message: 'Invalid email or password' });
+            return res.status(401).json({ message: 'Invalid email or password' });
         }
 
         // Check if user account is active
@@ -77,7 +86,7 @@ const loginUser = async (req, res) => {
             const otpSize = 6;
             const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
             console.log(`[AUTH] OTP for ${user.email} (Login): ${otpCode}`);
-            
+
             // Set OTP and expiry (10 minutes)
             user.otp = otpCode;
             user.otpExpires = Date.now() + 10 * 60 * 1000;
@@ -100,78 +109,78 @@ const loginUser = async (req, res) => {
         if (req.companyId && user.companyId && user.companyId.toString() !== req.companyId.toString()) {
             return res.status(401).json({ message: `Your account does not belong to the '${req.company?.name || 'requested'}' workspace.` });
         }
-            let permissions = [...new Set(
-                user.roles.flatMap(role => (role.permissions || []).filter(p => p).map(p => p.key))
-            )];
+        let permissions = [...new Set(
+            user.roles.flatMap(role => (role.permissions || []).filter(p => p).map(p => p.key))
+        )];
 
-            // Wildcard Expansion: If user has '*', provide ALL permissions
-            let hasAllPermissions = false;
-            const Permission = require('../models/Permission');
-            let totalPerms = 0, directReportsCount = 0, taCount = 0;
+        // Wildcard Expansion: If user has '*', provide ALL permissions
+        let hasAllPermissions = false;
+        const Permission = require('../models/Permission');
+        let totalPerms = 0, directReportsCount = 0, taCount = 0;
 
-            if (permissions.includes('*')) {
+        if (permissions.includes('*')) {
+            hasAllPermissions = true;
+            const allPermissions = await Permission.find({});
+
+            // Add all permission keys
+            const allKeys = allPermissions.map(p => p.key);
+            permissions = [...new Set([...permissions, ...allKeys])];
+
+            // Run auth queries in parallel
+            [directReportsCount, taCount] = await Promise.all([
+                User.countDocuments({ reportingManagers: user._id }),
+                HiringRequest.countDocuments({
+                    $or: [
+                        { createdBy: user._id },
+                        { 'ownership.hiringManager': user._id },
+                        { 'ownership.recruiter': user._id }
+                    ]
+                })
+            ]);
+        } else {
+            // Run auth queries in parallel
+            [totalPerms, directReportsCount, taCount] = await Promise.all([
+                Permission.countDocuments({ key: { $ne: '*' } }),
+                User.countDocuments({ reportingManagers: user._id }),
+                HiringRequest.countDocuments({
+                    $or: [
+                        { createdBy: user._id },
+                        { 'ownership.hiringManager': user._id },
+                        { 'ownership.recruiter': user._id }
+                    ]
+                })
+            ]);
+
+            if (totalPerms > 0 && permissions.length >= totalPerms) {
                 hasAllPermissions = true;
-                const allPermissions = await Permission.find({});
-
-                // Add all permission keys
-                const allKeys = allPermissions.map(p => p.key);
-                permissions = [...new Set([...permissions, ...allKeys])];
-
-                // Run auth queries in parallel
-                [directReportsCount, taCount] = await Promise.all([
-                    User.countDocuments({ reportingManagers: user._id }),
-                    HiringRequest.countDocuments({
-                        $or: [
-                            { createdBy: user._id },
-                            { 'ownership.hiringManager': user._id },
-                            { 'ownership.recruiter': user._id }
-                        ]
-                    })
-                ]);
-            } else {
-                // Run auth queries in parallel
-                [totalPerms, directReportsCount, taCount] = await Promise.all([
-                    Permission.countDocuments({ key: { $ne: '*' } }),
-                    User.countDocuments({ reportingManagers: user._id }),
-                    HiringRequest.countDocuments({
-                        $or: [
-                            { createdBy: user._id },
-                            { 'ownership.hiringManager': user._id },
-                            { 'ownership.recruiter': user._id }
-                        ]
-                    })
-                ]);
-
-                if (totalPerms > 0 && permissions.length >= totalPerms) {
-                    hasAllPermissions = true;
-                }
             }
+        }
 
-            // Check if they are an interviewer via per-candidate round assignment (precise check)
-            let isInterviewer = false;
-            if (taCount === 0 && !permissions.includes('ta.view') && !permissions.includes('*')) {
-                const interviewCount = await Candidate.countDocuments({
-                    'interviewRounds.assignedTo': user._id
-                });
-                isInterviewer = interviewCount > 0;
-            }
+        // Check if they are an interviewer via per-candidate round assignment (precise check)
+        let isInterviewer = false;
+        if (taCount === 0 && !permissions.includes('ta.view') && !permissions.includes('*')) {
+            const interviewCount = await Candidate.countDocuments({
+                'interviewRounds.assignedTo': user._id
+            });
+            isInterviewer = interviewCount > 0;
+        }
 
-            const company = await require('../models/Company').findById(user.companyId);
+        const company = await require('../models/Company').findById(user.companyId);
 
-            res.json({
-                _id: user._id,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                email: user.email,
-                joiningDate: user.joiningDate,
-                reportingManagers: user.reportingManagers,
-                roles: user.roles.map(r => r.name),
-                permissions: permissions,
-                hasAllPermissions: hasAllPermissions,
-                directReportsCount: directReportsCount,
-                isTAParticipant: taCount > 0 || isInterviewer,
-                company: company, // Full configuration for the frontend
-                token: generateToken(user._id, user.tokenVersion)
+        res.json({
+            _id: user._id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            joiningDate: user.joiningDate,
+            reportingManagers: user.reportingManagers,
+            roles: user.roles.map(r => r.name),
+            permissions: permissions,
+            hasAllPermissions: hasAllPermissions,
+            directReportsCount: directReportsCount,
+            isTAParticipant: taCount > 0 || isInterviewer,
+            company: company, // Full configuration for the frontend
+            token: generateToken(user._id, user.tokenVersion)
         });
     } catch (error) {
         console.error('LOGIN ERROR:', error);
@@ -211,13 +220,19 @@ const uploadProfilePicture = async (req, res) => {
 // @route   POST /api/auth/verify-otp-reset
 // @access  Public
 const verifyOtpAndResetPassword = async (req, res) => {
+    // Ensure companyId is identified from header/body if not in req.companyId (from middleware)
+    if (!req.companyId) {
+        req.companyId = req.headers['xtenent'] || req.headers['x-tenant'] || req.headers['x-tenant-id'] || req.body.companyId || req.body.tenant;
+    }
+
     const { email, otp, newPassword } = req.body;
 
     try {
-        const user = await User.findOne({ 
-            email, 
-            otp, 
-            otpExpires: { $gt: Date.now() } 
+        const user = await User.findOne({
+            email,
+            companyId: req.companyId,
+            otp,
+            otpExpires: { $gt: Date.now() }
         });
 
         if (!user) {
@@ -229,10 +244,10 @@ const verifyOtpAndResetPassword = async (req, res) => {
         user.isPasswordResetRequired = false;
         user.otp = null;
         user.otpExpires = null;
-        
+
         await user.save();
 
-        res.json({ 
+        res.json({
             message: 'Password reset successfully. You can now login with your new password.',
             success: true
         });
@@ -246,10 +261,15 @@ const verifyOtpAndResetPassword = async (req, res) => {
 // @route   POST /api/auth/resend-otp
 // @access  Public
 const resendOtp = async (req, res) => {
+    // Ensure companyId is identified from header if not in req.companyId (from middleware)
+    if (!req.companyId) {
+        req.companyId = req.headers['xtenent'] || req.headers['x-tenant'] || req.headers['x-tenant-id'];
+    }
+
     const { email } = req.body;
 
     try {
-        const user = await User.findOne({ email });
+        const user = await User.findOne({ email, companyId: req.companyId });
 
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
@@ -258,14 +278,14 @@ const resendOtp = async (req, res) => {
         // Generate new 6-digit OTP
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         console.log(`[AUTH] OTP for ${user.email} (Resend): ${otpCode}`);
-        
+
         user.otp = otpCode;
         user.otpExpires = Date.now() + 10 * 60 * 1000;
         await user.save();
 
         const emailSent = await emailService.sendOTPEmail(user.email, otpCode, user.firstName);
 
-        res.json({ 
+        res.json({
             message: 'A new OTP has been sent to your email.',
             emailSent: emailSent
         });

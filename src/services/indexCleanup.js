@@ -14,9 +14,10 @@ const cleanupStaleIndexes = async () => {
         const collectionNames = collections.map(c => c.name);
 
         const targetCollections = [
-            'roles', 'timesheets', 'hiringrequests', 'worklogs', 'attendance', 
-            'querytypes', 'leavebalances', 'leaveconfigs', 'holidays', 
-            'projects', 'modules', 'tasks', 'helpdeskqueries', 'candidates'
+            'roles', 'timesheets', 'hiringrequests', 'worklogs', 'attendance',
+            'querytypes', 'leavebalances', 'leaveconfigs', 'holidays',
+            'projects', 'modules', 'tasks', 'helpdeskqueries', 'candidates', 'users',
+            'onboardingemployees'
         ];
 
         for (const collName of targetCollections) {
@@ -25,7 +26,7 @@ const cleanupStaleIndexes = async () => {
             report.checked.push(collName);
             const coll = db.collection(collName);
             const indexes = await coll.indexes();
-            
+
             for (const idx of indexes) {
                 // If it's a unique index and doesn't contain companyId (except for _id)
                 const isUnique = idx.unique;
