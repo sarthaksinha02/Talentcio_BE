@@ -7,7 +7,6 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
     "migrate": "node scripts/migrate-production.js",
-    "prestart": "npm run migrate",
     "start": "node server.js"
   },
   "keywords": [],
