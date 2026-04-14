@@ -31,10 +31,16 @@ const storage = new CloudinaryStorage({
             folderName = 'resumes';
         }
 
+        // Determine resource_type based on file extension/mimetype
+        const isImage = file.mimetype.startsWith('image/');
+        const isVideo = file.mimetype.startsWith('video/');
+        const resourceType = isImage ? 'image' : (isVideo ? 'video' : 'raw');
+
         return {
             folder: folderName,
-            resource_type: 'auto',
-            public_id: file.originalname.split('.')[0] + '-' + Date.now(), // Ensure unique filenames
+            resource_type: resourceType,
+            // For 'raw' files (docs, etc.), Cloudinary requires the extension in public_id to serve it correctly.
+            public_id: `${file.originalname.split('.')[0]}-${Date.now()}.${file.originalname.split('.').pop()}`
         };
     },
 });
