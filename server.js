@@ -12,29 +12,9 @@ const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
 
-// CORS — must be first, before helmet and everything else
-const allowedOriginsList = [
-    'https://telentcio.vercel.app',
-    'https://talentcio.vercel.app',
-    'http://localhost:3000',
-    'https://telentcio-demo.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://localhost:5000',
-    'https://talent-cio-super-admin.vercel.app',
-    'https://talentcio-super-admin.vercel.app'
-];
-
+// CORS — allow all origins
 app.use(cors({
-    origin: function (origin, callback) {
-        // Allow requests with no origin (mobile apps, curl, Postman)
-        if (!origin) return callback(null, true);
-        if (allowedOriginsList.includes(origin)) {
-            return callback(null, true);
-        }
-        return callback(new Error(`CORS policy: Origin ${origin} not allowed`));
-    },
-    credentials: true,
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
     optionsSuccessStatus: 204
@@ -42,12 +22,7 @@ app.use(cors({
 
 // Explicitly handle pre-flight for ALL routes
 app.options('/{*path}', cors({
-    origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-        if (allowedOriginsList.includes(origin)) return callback(null, true);
-        return callback(new Error(`CORS policy: Origin ${origin} not allowed`));
-    },
-    credentials: true,
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
     optionsSuccessStatus: 204
