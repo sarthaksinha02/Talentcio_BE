@@ -12,9 +12,15 @@ const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
 
-// --- CUSTOM FOOLPROOF CORS MIDDLEWARE ---
+// Helmet first — but disable its cross-origin header overrides so our CORS middleware works
+app.use(helmet({
+    crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: false,
+}));
+
+// --- CUSTOM CORS MIDDLEWARE ---
 app.use((req, res, next) => {
-    const origin = req.headers.origin || req.headers.Origin;
+    const origin = req.headers.origin;
 
     // List of allowed origins
     const allowedOriginsList = [
@@ -29,24 +35,21 @@ app.use((req, res, next) => {
         'https://talentcio-super-admin.vercel.app'
     ];
 
-    if (origin) {
-        // UNCONDITIONAL ECHO FOR DEBUGGING
+    if (origin && allowedOriginsList.includes(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
 
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Accept, Cache-Control, Pragma, X-Requested-With, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     if (req.method === 'OPTIONS') {
-        return res.status(200).end();
+        return res.status(204).end();
     }
 
     next();
 });
 // ----------------------------------------------
-
-app.use(helmet());
 
 // Setup Socket.IO
 const io = new Server(server, {
