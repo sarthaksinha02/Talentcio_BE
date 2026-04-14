@@ -12,17 +12,40 @@ const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
 
-// CORS — raw middleware, runs before everything, no path-to-regexp involved
+// CORS — smart pattern-based, covers all envs: Vercel, custom domains, localhost, Render
+const isAllowedOrigin = (origin) => {
+    if (!origin) return true; // server-to-server / Postman / curl
+    try {
+        const { hostname } = new URL(origin);
+        return (
+            hostname === 'localhost' ||
+            hostname.endsWith('.localhost') ||           // ilumaa.localhost
+            hostname.endsWith('.vercel.app') ||          // *.vercel.app (all Vercel deployments)
+            hostname.endsWith('.talentcio.com') ||       // ilumaa.talentcio.com
+            hostname === 'talentcio.com' ||
+            hostname.endsWith('.telentcio.com') ||       // (typo variant in use)
+            hostname === 'telentcio.com' ||
+            hostname.endsWith('.onrender.com')           // inter-service on Render
+        );
+    } catch {
+        return false;
+    }
+};
+
 app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const origin = req.headers.origin;
+    if (isAllowedOrigin(origin)) {
+        // Echo back the exact origin so credentials work when needed
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+        if (origin) res.setHeader('Vary', 'Origin');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Accept, Cache-Control, Pragma, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
 
-    // Intercept preflight immediately — no downstream middleware needed
     if (req.method === 'OPTIONS') {
         return res.status(204).end();
     }
-
     next();
 });
 
