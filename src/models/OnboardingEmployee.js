@@ -91,7 +91,7 @@ const onboardingEmployeeSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['Pending', 'In Progress', 'Submitted', 'Reviewed'],
+        enum: ['Pending', 'Accepted', 'In Progress', 'Submitted', 'Reviewed'],
         default: 'Pending'
     },
 

@@ -21,7 +21,9 @@ const allowedOrigins = [
     'https://telentcio-demo.vercel.app',
     'http://localhost:5173',
     'http://localhost:5174',
-    'http://localhost:5000'
+    'http://localhost:5000',
+    'https://talent-cio-super-admin.vercel.app',
+    'https://talentcio-super-admin.vercel.app'
 ];
 
 const corsOptions = {
