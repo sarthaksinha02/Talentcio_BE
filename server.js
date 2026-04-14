@@ -8,6 +8,8 @@ const mongoose = require('mongoose');
 const connectDB = require('./db');
 
 const app = express();
+// Trust the first proxy (Render) so rate limiting uses correct client IPs
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // --- CUSTOM FOOLPROOF CORS MIDDLEWARE ---
