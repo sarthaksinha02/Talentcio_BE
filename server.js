@@ -28,21 +28,8 @@ app.use((req, res, next) => {
     ];
 
     if (origin) {
-        const normalizedOrigin = origin.replace(/\/$/, "");
-        const isSuperAdmin = normalizedOrigin.includes('talent-cio-super-admin.vercel.app') ||
-            normalizedOrigin.includes('talentcio-super-admin.vercel.app');
-
-        const isAllowed = isSuperAdmin ||
-            allowedOriginsList.some(allowed => normalizedOrigin === allowed.replace(/\/$/, "")) ||
-            normalizedOrigin.endsWith('.talentcio.com') ||
-            normalizedOrigin.endsWith('.telentcio.com') ||
-            normalizedOrigin.endsWith('.vercel.app') ||
-            normalizedOrigin.includes('localhost') ||
-            normalizedOrigin.includes('127.0.0.1');
-
-        if (isAllowed) {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-        }
+        // UNCONDITIONAL ECHO FOR DEBUGGING
+        res.setHeader('Access-Control-Allow-Origin', origin);
     }
 
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
