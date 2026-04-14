@@ -66,7 +66,6 @@ const corsOptions = {
 
 // Apply CORS globally before ANY other middleware
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Handle all preflight requests
 // ----------------------------------------------
 
 // Setup Socket.IO
