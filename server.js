@@ -35,24 +35,38 @@ const corsOptions = {
         const isAllowed = allowedOrigins.some(allowed => normalizedOrigin === allowed.replace(/\/$/, "")) ||
             normalizedOrigin.endsWith('.talentcio.com') ||
             normalizedOrigin.endsWith('.telentcio.com') ||
+            normalizedOrigin.endsWith('.vercel.app') || // Broadly allow vercel apps for testing if needed
             normalizedOrigin.includes('localhost') ||
             normalizedOrigin.includes('127.0.0.1');
 
         if (isAllowed) {
             callback(null, true);
         } else {
+            // Optional: You can log blocked origins here to debug
+            // console.log(`Origin ${origin} not allowed by CORS`);
             callback(null, false);
         }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'Accept', 'Cache-Control', 'Pragma', 'X-Requested-With'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-tenant-id',
+        'Accept',
+        'Cache-Control',
+        'Pragma',
+        'X-Requested-With',
+        'Origin',
+        'Access-Control-Request-Method',
+        'Access-Control-Request-Headers'
+    ],
     optionsSuccessStatus: 204
 };
 
 // Apply CORS globally before ANY other middleware
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions)); // Explicitly handle all preflight requests
+app.options('*', cors(corsOptions)); // Handle all preflight requests
 // ----------------------------------------------
 
 // Setup Socket.IO
