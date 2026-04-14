@@ -16,10 +16,7 @@ const generateToken = (id, tokenVersion) => {
 // @route   POST /api/auth/register
 // @access  Public
 const register = async (req, res) => {
-    // Ensure companyId is identified from header/body if not in req.companyId (from middleware)
-    if (!req.companyId) {
-        req.companyId = req.headers['xtenent'] || req.headers['x-tenant'] || req.headers['x-tenant-id'] || req.body.companyId || req.body.tenant;
-    }
+
 
     const { email, password, firstName, lastName } = req.body;
 
@@ -57,10 +54,7 @@ const register = async (req, res) => {
 // @route   POST /api/auth/login
 // @access  Public
 const loginUser = async (req, res) => {
-    // Ensure companyId is identified from header/body if not in req.companyId (from middleware)
-    if (!req.companyId) {
-        req.companyId = req.headers['xtenent'] || req.headers['x-tenant'] || req.headers['x-tenant-id'] || req.body.companyId || req.body.tenant;
-    }
+
 
     const { email, password } = req.body;
 

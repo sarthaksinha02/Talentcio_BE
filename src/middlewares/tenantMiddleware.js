@@ -19,13 +19,13 @@ const tenantMiddleware = async (req, res, next) => {
                 if (parts.length > 1 && parts[0] !== 'localhost') {
                     subdomain = parts[0];
                 }
-            } 
+            }
             // --- VERCEL / RENDER / CLOUD HANDLING ---
             else if (domain.endsWith('vercel.app') || domain.endsWith('onrender.com')) {
                 // Extract the project prefix (e.g., telentcio-demo or talentcio)
                 const suffix = domain.endsWith('vercel.app') ? '.vercel.app' : '.onrender.com';
                 subdomain = domain.replace(suffix, '');
-            } 
+            }
             // --- CUSTOM DOMAIN HANDLING ---
             else if (parts.length > 2) {
                 const cloudProviders = ['render.com', 'herokuapp.com'];
@@ -44,7 +44,7 @@ const tenantMiddleware = async (req, res, next) => {
         }
 
         // 3. Skip resolution for non-tenant routes
-        const isNonTenantSubdomain = !subdomain || ['www', 'api', 'localhost', 'telentcio', 'telentcio-demo',"talentcio-be",  'talentcio'].includes(subdomain.toLowerCase());
+        const isNonTenantSubdomain = !subdomain || ['www', 'api', 'localhost', 'telentcio-demo', 'talentcio-be', 'talentcio'].includes(subdomain.toLowerCase());
         if (isNonTenantSubdomain) {
             return next();
         }
