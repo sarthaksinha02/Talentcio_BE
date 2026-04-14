@@ -10,32 +10,30 @@ const connectDB = require('./db');
 const app = express();
 const server = http.createServer(app);
 
-// --- CORS CONFIGURATION (MUST BE AT THE TOP) ---
-const allowedOrigins = [
-    'https://telentcio.vercel.app',
-    'https://talentcio.vercel.app',
-    'http://localhost:3000',
-    'https://telentcio-demo.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://localhost:5000',
-    'https://talent-cio-super-admin.vercel.app',
-    'https://talentcio-super-admin.vercel.app'
-];
+// --- CUSTOM FOOLPROOF CORS MIDDLEWARE ---
+app.use((req, res, next) => {
+    const origin = req.headers.origin || req.headers.Origin;
 
-const corsOptions = {
-    origin: function (origin, callback) {
-        // Allow if no origin (usually for non-browser clients)
-        if (!origin) return callback(null, true);
+    // List of allowed origins
+    const allowedOriginsList = [
+        'https://telentcio.vercel.app',
+        'https://talentcio.vercel.app',
+        'http://localhost:3000',
+        'https://telentcio-demo.vercel.app',
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://localhost:5000',
+        'https://talent-cio-super-admin.vercel.app',
+        'https://talentcio-super-admin.vercel.app'
+    ];
 
+    if (origin) {
         const normalizedOrigin = origin.replace(/\/$/, "");
-
-        // Very explicit check for the super admin origins
         const isSuperAdmin = normalizedOrigin.includes('talent-cio-super-admin.vercel.app') ||
             normalizedOrigin.includes('talentcio-super-admin.vercel.app');
 
         const isAllowed = isSuperAdmin ||
-            allowedOrigins.some(allowed => normalizedOrigin === allowed.replace(/\/$/, "")) ||
+            allowedOriginsList.some(allowed => normalizedOrigin === allowed.replace(/\/$/, "")) ||
             normalizedOrigin.endsWith('.talentcio.com') ||
             normalizedOrigin.endsWith('.telentcio.com') ||
             normalizedOrigin.endsWith('.vercel.app') ||
@@ -43,44 +41,33 @@ const corsOptions = {
             normalizedOrigin.includes('127.0.0.1');
 
         if (isAllowed) {
-            callback(null, true);
-        } else {
-            callback(null, false);
+            res.setHeader('Access-Control-Allow-Origin', origin);
         }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: [
-        'Content-Type',
-        'Authorization',
-        'x-tenant-id',
-        'Accept',
-        'Cache-Control',
-        'Pragma',
-        'X-Requested-With',
-        'Origin',
-        'Access-Control-Request-Method',
-        'Access-Control-Request-Headers'
-    ],
-    optionsSuccessStatus: 204
-};
+    }
 
-// Apply CORS globally before ANY other middleware
-app.use(cors(corsOptions));
-// Explicit manual preflight handler
-app.options(/.*/, (req, res) => {
-    res.header('Access-Control-Allow-Origin', req.header('Origin'));
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Accept, Cache-Control, Pragma, X-Requested-With, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.sendStatus(204);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Accept, Cache-Control, Pragma, X-Requested-With, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
+    next();
 });
+// ----------------------------------------------
 
 app.use(helmet());
 
 // Setup Socket.IO
 const io = new Server(server, {
-    cors: corsOptions
+    cors: {
+        origin: function (origin, callback) {
+            callback(null, true);
+        },
+        credentials: true,
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    }
 });
 
 // Expose io to routes
