@@ -44,7 +44,7 @@ const tenantMiddleware = async (req, res, next) => {
         }
 
         // 3. Skip resolution for non-tenant routes
-        const isNonTenantSubdomain = !subdomain || ['www', 'api', 'localhost', 'telentcio-demo', 'talentcio-be', 'talentcio'].includes(subdomain.toLowerCase());
+        const isNonTenantSubdomain = !subdomain || ['www', 'api', 'localhost', 'talentcio-be', 'talentcio'].includes(subdomain.toLowerCase());
         if (isNonTenantSubdomain) {
             return next();
         }
