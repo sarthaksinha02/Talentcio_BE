@@ -7,36 +7,60 @@ const Project = require('../models/Project');
 // @access  Private
 const getDashboardStats = async (req, res) => {
     try {
+        const Role = require('../models/Role'); // Import Role model
         const now = new Date();
         const istString = now.toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' });
         const today = new Date(istString);
         const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
 
+        // 1. Get system roles
+        const systemRoles = await Role.find({ isSystem: true, isActive: true }).select('_id');
+        const systemRoleIds = systemRoles.map(r => r._id);
 
+        // 2. Identify all active users for the company
+        const allActiveUsers = await User.find({
+            isActive: true,
+            companyId: req.companyId
+        })
+            .populate('roles', 'name isSystem')
+            .lean();
 
-        // Run all independent DB queries in parallel
+        // 3. Filter to exclude ONLY the primary system user
+        const filteredUsers = allActiveUsers.filter(u => {
+            const hasSystemRole = u.roles?.some(r => r.isSystem);
+            // Targeted: Only exclude the account typically used as 'System' (admin@gmail.com)
+            // or if it's explicitly named 'Admin User' and has a system role.
+            const isSystemIdentity = u.email === 'admin@gmail.com' || (u.firstName === 'Admin' && u.lastName === 'User');
+
+            return !(hasSystemRole && isSystemIdentity);
+        });
+
+        const nonSystemUserIds = filteredUsers.map(u => u._id);
+        const totalEmployees = nonSystemUserIds.length;
+
+        // 4. Run calculations based on filtered user list
         const [
-            totalEmployees,
-            presentToday,
+            presentTodayCount,
             pendingRequests,
-            allUsers,
             todaysAttendance,
             allProjects
         ] = await Promise.all([
-            User.countDocuments({ isActive: true, companyId: req.companyId }),
             Attendance.countDocuments({
                 companyId: req.companyId,
+                user: { $in: nonSystemUserIds },
                 date: { $gte: today, $lt: tomorrow },
                 status: { $in: ['PRESENT', 'HALF_DAY'] }
             }),
-            Attendance.countDocuments({ approvalStatus: 'PENDING', companyId: req.companyId }),
-            User.find({ isActive: true, companyId: req.companyId })
-                .select('firstName lastName employmentType roles')
-                .populate('roles', 'name')
-                .lean(),
+            Attendance.countDocuments({
+                approvalStatus: 'PENDING',
+                companyId: req.companyId,
+                user: { $in: nonSystemUserIds } // Only count pending requests from non-system users
+            }),
             Attendance.find({
                 companyId: req.companyId,
-                date: { $gte: today, $lt: tomorrow } })
+                user: { $in: nonSystemUserIds },
+                date: { $gte: today, $lt: tomorrow }
+            })
                 .select('user status clockIn clockOut location clockOutLocation')
                 .lean(),
             Project.find({ companyId: req.companyId })
@@ -46,13 +70,15 @@ const getDashboardStats = async (req, res) => {
                 .lean()
         ]);
 
-        const absentToday = totalEmployees - presentToday;
+        const presentToday = presentTodayCount;
+        const absentToday = Math.max(0, totalEmployees - presentToday);
+
         const attendanceByUserId = new Map(
             todaysAttendance.map(record => [record.user.toString(), record])
         );
 
-        // Map users to their today's attendance status
-        const dailyStatusList = allUsers.map(user => {
+        // Map users to their today's attendance status (only filtered non-system users)
+        const dailyStatusList = filteredUsers.map(user => {
             const record = attendanceByUserId.get(user._id.toString());
             const roleName = user.roles?.length > 0 ? user.roles[0].name : 'Employee';
 

@@ -345,57 +345,63 @@ exports.sendPreOnboardingEmail = async (req, res) => {
     }
 };
 
-// --- Send a custom file to candidate ---
+// --- Send custom file(s) to candidate ---
 exports.sendCustomFile = async (req, res) => {
     try {
         const { id } = req.params;
         const employee = await OnboardingEmployee.findOne({ _id: id, companyId: req.companyId });
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
-        if (!req.file) {
-            return res.status(400).json({ message: 'No file uploaded' });
+        const files = req.files || [];
+        if (files.length === 0) {
+            return res.status(400).json({ message: 'No files uploaded' });
         }
+
+        const fileNamesList = files.map(f => `<li><strong>${f.originalname}</strong></li>`).join('');
+        const fileCountText = files.length === 1 ? 'a document' : `${files.length} documents`;
 
         const emailHtml = `
             <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
-                <h2 style="color: #2563eb; margin: 0 0 16px;">New Document from HR</h2>
+                <h2 style="color: #2563eb; margin: 0 0 16px;">New Document(s) from HR</h2>
                 <p>Hello <strong>${employee.firstName}</strong>,</p>
-                <p>Your HR team has sent you an additional document regarding your onboarding process.</p>
-                <p>Please find the attached file: <strong>${req.file.originalname}</strong></p>
-                <div style="margin: 24px 0; padding: 16px; background: #f8fafc; border-radius: 8px; font-size: 14px; border: 1px solid #e2e8f0;">
-                    📁 <strong>File:</strong> ${req.file.originalname}
-                </div>
+                <p>Your HR team has sent you ${fileCountText} regarding your onboarding process.</p>
+                <p>Please find the attached files:</p>
+                <ul>
+                    ${fileNamesList}
+                </ul>
                 <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
                 <p style="font-size: 12px; color: #94a3b8; text-align: center;">© ${new Date().getFullYear()} TalentCio. All rights reserved.</p>
             </div>
         `;
 
+        const attachments = files.map(f => ({
+            filename: f.originalname,
+            path: f.path
+        }));
+
         const sent = await sendEmail({
             to: employee.email,
-            subject: `Action Required: New Document for Your Onboarding – ${req.file.originalname}`,
+            subject: `Action Required: New ${files.length > 1 ? 'Documents' : 'Document'} for Your Onboarding`,
             html: emailHtml,
-            attachments: [
-                {
-                    filename: req.file.originalname,
-                    path: req.file.path // Uses Cloudinary URL
-                }
-            ]
+            attachments
         });
 
         if (!sent) {
             return res.status(500).json({ message: 'Failed to send email' });
         }
 
-        // Add audit log
-        employee.auditLog.push({
-            action: 'CUSTOM_FILE_SENT',
-            details: `File "${req.file.originalname}" sent to candidate's email by HR`
+        // Add audit log entries
+        files.forEach(f => {
+            employee.auditLog.push({
+                action: 'CUSTOM_FILE_SENT',
+                details: `File "${f.originalname}" sent to candidate's email by HR`
+            });
         });
         await employee.save();
 
-        res.json({ message: 'File sent successfully to candidate email' });
+        res.json({ message: `${files.length} file(s) sent successfully to candidate email` });
     } catch (error) {
-        console.error('Error sending custom file:', error);
+        console.error('Error sending custom file(s):', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 };
@@ -705,12 +711,12 @@ exports.approveDocument = async (req, res) => {
         doc.status = 'Approved';
         doc.rejectionReason = '';
 
-        // Check if all uploaded docs are approved, then mark as Reviewed
+        // Check if all uploaded docs are approved, then mark as Accepted (previously Reviewed)
         const allReviewedStatus = employee.documents.every(d =>
             d.status === 'Approved' || d.status === 'Pending' || d.status === 'Mail Sent'
         );
         if (allReviewedStatus && employee.status === 'Submitted') {
-            employee.status = 'Reviewed';
+            employee.status = 'Accepted';
         }
 
         employee.auditLog.push({ action: 'DOCUMENT_APPROVED', details: `${doc.label} approved` });
@@ -1542,9 +1548,49 @@ exports.downloadTemplate = async (req, res) => {
     }
 };
 
-// ==========================================
-// DOCUMENT GENERATION ENDPOINTS
-// ==========================================
+// --- Shared Helper for Populating Documents ---
+const getPopulatedDocumentBuffer = async (employee, company, templateUrl, defaultPath = null) => {
+    const content = await getTemplateContent(templateUrl, defaultPath);
+    const zip = new PizZip(content);
+    const doc = new Docxtemplater(zip, {
+        paragraphLoop: true,
+        linebreaks: true,
+        nullGetter: () => '—'
+    });
+
+    const fullName = employee.personalDetails?.fullName || `${employee.firstName} ${employee.lastName}`.trim();
+    const hrUser = employee.createdBy || {};
+    const permAddr = employee.personalDetails?.permanentAddress || employee.personalDetails?.currentAddress || {};
+
+    doc.render({
+        offer_date: formatDate(employee.offerDate || new Date()),
+        employee_full_name: fullName,
+        employee_first_name: employee.firstName,
+        employee_last_name: employee.lastName,
+        employee_id: employee.tempEmployeeId,
+        designation: employee.designation || '—',
+        department: employee.department || '—',
+        joining_date: formatDate(employee.joiningDate),
+        work_location: employee.workLocation || '—',
+        probation_period: employee.probationPeriod || '6 months',
+        probationPeriod: employee.probationPeriod || '6 months',
+        annual_ctc: formatCurrency(employee.salary?.annualCTC),
+        annual_salary: formatCurrency(employee.salary?.annualCTC),
+        basic_salary: formatCurrency(employee.salary?.basic),
+        hra: formatCurrency(employee.salary?.hra),
+        special_allowance: formatCurrency(employee.salary?.specialAllowance),
+        monthly_gross: formatCurrency(employee.salary?.monthlyGross),
+        monthly_ctc: formatCurrency(employee.salary?.monthlyCTC),
+        employee_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
+        employee_city: permAddr.city || '—',
+        hr_name: hrUser.firstName ? `${hrUser.firstName} ${hrUser.lastName || ''}`.trim() : 'Authorized Signatory',
+        hr_designation: hrUser.designation || 'HR Manager',
+        declaration_date: formatDate(new Date()),
+        employee_signature_name: fullName
+    });
+
+    return doc.getZip().generate({ type: 'nodebuffer' });
+};
 
 
 
@@ -1560,50 +1606,12 @@ exports.generateOfferLetter = async (req, res) => {
 
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
-        const customUrl = company?.settings?.onboarding?.offerLetterTemplateUrl;
-        const defaultPath = path.join(__dirname, '../../templates/offer_letter_template.docx');
-
-        const content = await getTemplateContent(customUrl, defaultPath);
-        const zip = new PizZip(content);
-        const doc = new Docxtemplater(zip, {
-            paragraphLoop: true,
-            linebreaks: true,
-            nullGetter: () => '—'
-        });
-
-        const fullName = employee.personalDetails?.fullName || `${employee.firstName} ${employee.lastName}`.trim();
-        const permAddr = employee.personalDetails?.permanentAddress || employee.personalDetails?.currentAddress || {};
-        const hrUser = employee.createdBy || {};
-
-        doc.render({
-            offer_date: formatDate(employee.offerDate || new Date()),
-            employee_full_name: fullName,
-            employee_first_name: employee.firstName,
-            employee_last_name: employee.lastName,
-            employee_permanent_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
-            employee_address: [permAddr.line1, permAddr.line2].filter(Boolean).join(', ') || employee.address || '—',
-            employee_city: permAddr.city || '—',
-            designation: employee.designation || '—',
-            department: employee.department || '—',
-            joining_date: formatDate(employee.joiningDate),
-            work_location: employee.workLocation || '—',
-            probation_period: employee.probationPeriod || '6 months',
-            probationPeriod: employee.probationPeriod || '6 months',
-            annual_ctc: formatCurrency(employee.salary?.annualCTC),
-            annual_salary: formatCurrency(employee.salary?.annualCTC),
-            basic_salary: formatCurrency(employee.salary?.basic),
-            hra: formatCurrency(employee.salary?.hra),
-            special_allowance: formatCurrency(employee.salary?.specialAllowance),
-            monthly_gross: formatCurrency(employee.salary?.monthlyGross),
-            monthly_ctc: formatCurrency(employee.salary?.monthlyCTC),
-            hr_name: hrUser.firstName ? `${hrUser.firstName} ${hrUser.lastName || ''}`.trim() : 'Authorized Signatory',
-            hr_designation: hrUser.designation || 'HR Manager',
-            declaration_date: formatDate(new Date()),
-            employee_signature_name: fullName,
-            employee_id: employee.tempEmployeeId
-        });
-
-        const buffer = doc.getZip().generate({ type: 'nodebuffer' });
+        const buffer = await getPopulatedDocumentBuffer(
+            employee,
+            company,
+            company?.settings?.onboarding?.offerLetterTemplateUrl,
+            path.join(__dirname, '../../templates/offer_letter_template.docx')
+        );
 
         // Track generation
         await OnboardingEmployee.findByIdAndUpdate(employee._id, {
@@ -1635,45 +1643,15 @@ exports.generateDeclaration = async (req, res) => {
 
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
-        const customUrl = company?.settings?.onboarding?.declarationTemplateUrl;
-        const defaultPath = path.join(__dirname, '../../templates/declaration_template.docx');
+        const buffer = await getPopulatedDocumentBuffer(
+            employee,
+            company,
+            company?.settings?.onboarding?.declarationTemplateUrl,
+            path.join(__dirname, '../../templates/declaration_template.docx')
+        );
 
-        const content = await getTemplateContent(customUrl, defaultPath);
-        const zip = new PizZip(content);
-        const doc = new Docxtemplater(zip, {
-            paragraphLoop: true,
-            linebreaks: true,
-            nullGetter: () => '—'
-        });
-
-        const fullName = employee.personalDetails?.fullName || `${employee.firstName} ${employee.lastName}`.trim();
         const hrUser = employee.createdBy || {};
-
-        doc.render({
-            declaration_date: formatDate(employee.offerDate || new Date()),
-            employee_full_name: fullName,
-            employee_first_name: employee.firstName,
-            employee_last_name: employee.lastName,
-            employee_id: employee.tempEmployeeId,
-            designation: employee.designation || '—',
-            department: employee.department || '—',
-            joining_date: formatDate(employee.joiningDate),
-            work_location: employee.workLocation || '—',
-            probation_period: employee.probationPeriod || '6 months',
-            probationPeriod: employee.probationPeriod || '6 months',
-            annual_ctc: formatCurrency(employee.salary?.annualCTC),
-            annual_salary: formatCurrency(employee.salary?.annualCTC),
-            basic_salary: formatCurrency(employee.salary?.basic),
-            hra: formatCurrency(employee.salary?.hra),
-            special_allowance: formatCurrency(employee.salary?.specialAllowance),
-            monthly_gross: formatCurrency(employee.salary?.monthlyGross),
-            monthly_ctc: formatCurrency(employee.salary?.monthlyCTC),
-            employee_signature_name: fullName,
-            hr_name: hrUser.firstName ? `${hrUser.firstName} ${hrUser.lastName || ''}`.trim() : 'Authorized Signatory',
-            hr_designation: hrUser.designation || 'HR Manager'
-        });
-
-        const buffer = doc.getZip().generate({ type: 'nodebuffer' });
+        const fullName = employee.personalDetails?.fullName || `${employee.firstName} ${employee.lastName}`.trim();
 
         // Audit log
         await OnboardingEmployee.findByIdAndUpdate(employee._id, {
@@ -1688,6 +1666,34 @@ exports.generateDeclaration = async (req, res) => {
     } catch (error) {
         console.error('Error generating declaration:', error);
         res.status(500).json({ message: 'Failed to generate declaration', error: error.message });
+    }
+};
+
+// --- Generate & download Dynamic Template ---
+exports.generateDynamicTemplate = async (req, res) => {
+    try {
+        const { id, templateId } = req.params;
+        const [employee, company] = await Promise.all([
+            OnboardingEmployee.findOne({ _id: id, companyId: req.companyId })
+                .populate('createdBy', 'firstName lastName designation')
+                .lean(),
+            Company.findById(req.companyId).select('settings.onboarding').lean()
+        ]);
+
+        if (!employee) return res.status(404).json({ message: 'Employee not found' });
+
+        const template = company.settings.onboarding.dynamicTemplates.find(t => t._id.toString() === templateId);
+        if (!template) return res.status(404).json({ message: 'Template not found' });
+
+        const buffer = await getPopulatedDocumentBuffer(employee, company, template.url);
+
+        const safeName = template.name.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_');
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.setHeader('Content-Disposition', `inline; filename=${safeName}.docx`);
+        res.send(buffer);
+    } catch (error) {
+        console.error('Error generating dynamic template preview:', error);
+        res.status(500).json({ message: 'Failed to generate document', error: error.message });
     }
 };
 
@@ -1777,15 +1783,20 @@ exports.acceptOfferLetter = async (req, res) => {
         const dynamicTemplates = company?.settings?.onboarding?.dynamicTemplates || [];
 
         // Prepare lists for automated acceptance
-        const reqDocsLabels = (employee.requestedDocuments || []).map(rd => typeof rd === 'string' ? rd : rd.label);
+        // 1. Process requestedDocuments to update statuses (like "Mail Sent" -> "Accepted")
+        employee.requestedDocuments.forEach(doc => {
+            const label = doc.label;
 
-        // 1. Mark requested templates as Accepted in offerDeclaration
-        if (reqDocsLabels.includes('Offer Letter')) {
-            employee.offerDeclaration.hasReadOfferLetter = true;
-        }
+            // A. Check for Offer Letter (Case-insensitive regex)
+            if (/offer\s*letter/i.test(label)) {
+                doc.status = 'Accepted';
+                employee.offerDeclaration.hasReadOfferLetter = true;
+            }
 
-        dynamicTemplates.forEach(temp => {
-            if (reqDocsLabels.includes(temp.name)) {
+            // B. Check for Dynamic Templates
+            const temp = dynamicTemplates.find(t => t.name === label);
+            if (temp) {
+                doc.status = 'Accepted';
                 if (!employee.offerDeclaration.acceptedTemplates.some(t => t.templateId === temp._id.toString())) {
                     employee.offerDeclaration.acceptedTemplates.push({
                         templateId: temp._id.toString(),
@@ -1794,11 +1805,11 @@ exports.acceptOfferLetter = async (req, res) => {
                     });
                 }
             }
-        });
 
-        // 2. Mark requested policies as Accepted
-        policies.forEach(policy => {
-            if (reqDocsLabels.includes(policy.name)) {
+            // C. Check for Policies
+            const policy = policies.find(p => p.name === label);
+            if (policy) {
+                doc.status = 'Accepted';
                 if (!employee.offerDeclaration.acceptedPolicies.some(p => p.policyId === policy._id.toString())) {
                     employee.offerDeclaration.acceptedPolicies.push({
                         policyId: policy._id.toString(),
@@ -1809,6 +1820,9 @@ exports.acceptOfferLetter = async (req, res) => {
             }
         });
 
+        // 2. Ensure hasReadOfferLetter is true unconditionally upon offer acceptance
+        employee.offerDeclaration.hasReadOfferLetter = true;
+
         // 3. Mark matching document status to Approved
         employee.documents.forEach(doc => {
             if (doc.type === 'offer-letter' || dynamicTemplates.some(t => t.name === doc.label)) {
@@ -1818,8 +1832,9 @@ exports.acceptOfferLetter = async (req, res) => {
 
         // 4. Update overall status
         employee.offerStatus = 'Accepted';
-        employee.status = 'Accepted';
-        // employee.offerDeclaration.isComplete = true; // REMOVED: Declaration should be a separate step
+        if (employee.status === 'Pending') {
+            employee.status = 'In Progress';
+        }
 
         employee.auditLog.push({
             action: 'OFFER_ACCEPTED',
@@ -1831,7 +1846,7 @@ exports.acceptOfferLetter = async (req, res) => {
         // Sync TA phase3Decision → 'Offer Accepted'
         await syncTADecision(employee, 'Offer Accepted');
 
-        res.status(200).json({ message: 'Offer accepted successfully!', offerStatus: employee.offerStatus });
+        res.status(200).json({ message: 'Offer accepted successfully!', offerStatus: employee.offerStatus, status: employee.status });
     } catch (error) {
         console.error('Error accepting offer letter:', error);
         res.status(500).json({ message: 'Failed to accept offer letter', error: error.message });
